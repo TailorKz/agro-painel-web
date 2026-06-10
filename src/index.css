@@ -1,0 +1,14 @@
+@import "tailwindcss";
+
+/* Definindo o tema customizado do AgroContábil no Tailwind v4 */
+@theme {
+  --color-agro-primary: #1E5222;
+  --color-agro-secondary: #2E7D32;
+  --color-agro-light: #81C784;
+  --color-agro-background: #F5F7FA;
+}
+
+body {
+  margin: 0;
+  background-color: var(--color-agro-background);
+}
