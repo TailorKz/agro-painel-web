@@ -5,6 +5,7 @@ import { DashboardLayout } from './components/DashboardLayout';
 import { Produtores } from './screens/Produtores';
 import { Parametrizacao } from './screens/Parametrizacao';
 import { VisaoGeral } from './screens/VisaoGeral';
+import { NotasFiscais } from './screens/NotasFiscais'; // <-- IMPORTAÇÃO NOVA
 
 export default function App() {
   return (
@@ -12,10 +13,10 @@ export default function App() {
       <BrowserRouter>
         <Routes>
           <Route path="/" element={<DashboardLayout />}>
-            {/* index para abrir primeiro quando a rota for / */}
-            <Route index element={<VisaoGeral />} /> 
+            <Route index element={<VisaoGeral />} />
             <Route path="produtores" element={<Produtores />} />
             <Route path="parametrizacao" element={<Parametrizacao />} />
+            <Route path="notas" element={<NotasFiscais />} />
           </Route>
         </Routes>
       </BrowserRouter>

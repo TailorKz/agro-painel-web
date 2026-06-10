@@ -1,4 +1,5 @@
-import React, { createContext, useState, useContext, ReactNode } from 'react';
+import React, { createContext, useState, useContext } from 'react';
+import type { ReactNode } from 'react';
 
 // Tipagem do Produtor cadastrado pelo contador
 export type Producer = {
@@ -33,7 +34,7 @@ export function ProducerProvider({ children }: { children: ReactNode }) {
     </ProducerContext.Provider>
   );
 }
-
+// eslint-disable-next-line react-refresh/only-export-components
 export function useProducer() {
   const context = useContext(ProducerContext);
   if (!context) throw new Error('useProducer deve ser usado dentro de um ProducerProvider');

@@ -23,6 +23,7 @@ const initialRules: NcmRule[] = [
 export function Parametrizacao() {
   const [searchTerm, setSearchTerm] = useState('');
   const [rules, setRules] = useState<NcmRule[]>(initialRules);
+  const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
 
   // Função para alternar entre Dedutível e Não Dedutível
   const toggleDeductible = (id: string) => {
@@ -125,9 +126,33 @@ export function Parametrizacao() {
                 </td>
 
                 <td className="px-6 py-4 text-right">
-                  <button className="p-2 hover:bg-gray-100 rounded-lg text-gray-400 transition-colors">
-                    <MoreVertical size={18} />
-                  </button>
+                  <div className="relative inline-block text-left">
+                    <button 
+                      onClick={() => setMenuOpenId(menuOpenId === rule.id ? null : rule.id)}
+                      className="p-2 hover:bg-gray-100 rounded-lg text-gray-400 transition-colors"
+                    >
+                      <MoreVertical size={18} />
+                    </button>
+
+                    {/* Dropdown de Ações */}
+                    {menuOpenId === rule.id && (
+                      <div className="absolute right-0 mt-2 w-36 bg-white border border-gray-100 rounded-xl shadow-lg z-50 overflow-hidden flex flex-col">
+                        <button 
+                          onClick={() => { console.log('Editar', rule.id); setMenuOpenId(null); }}
+                          className="px-4 py-2.5 text-sm text-left font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+                        >
+                          Editar Regra
+                        </button>
+                        <div className="h-px bg-gray-100 w-full" />
+                        <button 
+                          onClick={() => { console.log('Excluir', rule.id); setMenuOpenId(null); }}
+                          className="px-4 py-2.5 text-sm text-left font-medium text-rose-600 hover:bg-rose-50 transition-colors"
+                        >
+                          Excluir
+                        </button>
+                      </div>
+                    )}
+                  </div>
                 </td>
               </tr>
             ))}

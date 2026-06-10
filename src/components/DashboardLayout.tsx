@@ -8,7 +8,9 @@ export function DashboardLayout() {
   const menuItems = [
     { icon: <LayoutDashboard size={20} />, label: 'Visão Geral', path: '/' },
     { icon: <Users size={20} />, label: 'Gerenciar Produtores', path: '/produtores' },
+    { icon: <FileText size={20} />, label: 'Notas Fiscais', path: '/notas' },
     { icon: <Sliders size={20} />, label: 'Regras de NCM', path: '/parametrizacao' },
+    { icon: <Settings size={20} />, label: 'Configurações', path: '/configuracoes' },
   ];
 
   return (
