@@ -19,9 +19,9 @@ const ProducerContext = createContext<ProducerContextType | undefined>(undefined
 
 // Dados mockados de exemplo (isso virá da sua API Java depois)
 const mockProducers: Producer[] = [
-  { id: '1', name: 'João Silva (Chácara Vista Alegre)', document: '123.456.789-00', ie: '251.432.988' },
-  { id: '2', name: 'Sítio Recanto Verde (Família Kunz)', document: '98.765.432/0001-99', ie: '255.881.321' },
-  { id: '3', name: 'Fazenda Sombra da Mata', document: '456.123.789-11', ie: '260.992.114' },
+  { id: '1', name: 'Elói Beilke', document: '123.456.789-00', ie: '251.432.988' },
+  { id: '2', name: 'Tailor Kunz', document: '98.765.432/0001-99', ie: '255.881.321' },
+  { id: '3', name: 'Produtor 3', document: '456.123.789-11', ie: '260.992.114' },
 ];
 
 export function ProducerProvider({ children }: { children: ReactNode }) {

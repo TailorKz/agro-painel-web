@@ -3,7 +3,7 @@ import { ProducerProvider } from './context/ProducerContext';
 import { DashboardLayout } from './components/DashboardLayout';
 
 // Novas telas
-import { LandingPage } from './screens/Landingpage';
+import { LandingPage } from './screens/LandingPage';
 import { Login } from './screens/Login';
 
 // Telas existentes
@@ -11,6 +11,7 @@ import { Produtores } from './screens/Produtores';
 import { Parametrizacao } from './screens/Parametrizacao';
 import { VisaoGeral } from './screens/VisaoGeral';
 import { NotasFiscais } from './screens/NotasFiscais';
+import { Register } from './screens/Register';
 
 export default function App() {
   return (
@@ -20,6 +21,7 @@ export default function App() {
           {/* Rotas públicas (sem sidebar) */}
           <Route path="/landing" element={<LandingPage />} />
           <Route path="/login" element={<Login />} />
+          <Route path="/register" element={<Register />} />
 
           {/* Rotas protegidas (com DashboardLayout + sidebar) */}
           <Route path="/" element={<DashboardLayout />}>

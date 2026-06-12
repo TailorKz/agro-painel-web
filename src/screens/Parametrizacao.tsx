@@ -16,8 +16,7 @@ const initialRules: NcmRule[] = [
   { id: '2', ncm: '3808.91.00', description: 'Inseticidas e Defensivos Agrícolas', category: 'Insumos', isDeductible: true },
   { id: '3', ncm: '2710.19.21', description: 'Óleo Diesel (Combustível)', category: 'Uso e Consumo', isDeductible: true },
   { id: '4', ncm: '8701.90.90', description: 'Tratores Agrícolas', category: 'Máquinas', isDeductible: true },
-  { id: '5', ncm: '8528.72.00', description: 'Aparelhos Receptores de Televisão', category: 'Despesa Pessoal', isDeductible: false },
-  { id: '6', ncm: '2203.00.00', description: 'Cerveja de Malte', category: 'Despesa Pessoal', isDeductible: false },
+  
 ];
 
 export function Parametrizacao() {

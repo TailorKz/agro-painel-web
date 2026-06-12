@@ -20,9 +20,9 @@ export function DashboardLayout() {
         <div>
           <div className="p-6 border-b border-emerald-900/50 flex items-center gap-3">
             <div className="w-8 h-8 rounded-lg bg-agro-light flex items-center justify-center font-bold text-agro-primary">
-              A
+              <img src="/logo.png" alt="AgroContábil" className="h-10 w-auto object-contain" />
             </div>
-            <span className="font-bold text-lg tracking-wide">AGROCONTÁBIL</span>
+            <span className="font-bold text-lg tracking-wide">Agro POPs</span>
           </div>
 
           {/* Navegação PRO usando NavLink (muda a cor automaticamente quando ativo) */}
@@ -53,8 +53,8 @@ export function DashboardLayout() {
               <User size={18} />
             </div>
             <div>
-              <p className="text-sm font-semibold leading-tight">Mário Rezende</p>
-              <p className="text-xs text-emerald-300/80">Contador Master</p>
+              <p className="text-sm font-semibold leading-tight"> Contador nome</p>
+              <p className="text-xs text-emerald-300/80">Contador</p>
             </div>
           </div>
           <button className="text-emerald-300 hover:text-white p-1 rounded-lg">
