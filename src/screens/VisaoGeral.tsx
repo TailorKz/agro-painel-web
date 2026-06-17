@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { 
   TrendingUp, 
@@ -13,29 +13,84 @@ import {
 } from 'lucide-react';
 import { useProducer } from '../context/ProducerContext';
 
+// Tipagem para as Notas Fiscais vindas do Java
+type NotaFiscal = {
+  id: number;
+  numero: string;
+  dataEmissao: string;
+  tipo: 'ENTRADA' | 'SAIDA';
+  valor: number;
+  isDedutivel: boolean;
+  descricao: string;
+};
+
 export function VisaoGeral() {
   const { currentProducer } = useProducer();
   const navigate = useNavigate();
   const [showValues, setShowValues] = useState(true);
   const [activeFilter, setActiveFilter] = useState('Este Mês');
-
-  const financeData = {
-    saldo: 'R$ 45.230,00',
-    entradas: 'R$ 62.000,00',
-    saidas: 'R$ 16.770,00',
-    dedutivel: 'R$ 12.450,00',
-    naoDedutivel: 'R$ 4.320,00',
-    porcentagemDedutivel: 74
-  };
-
-  const ultimasNotas = [
-    { id: '1', data: '08/06/2026', descricao: 'Venda de Soja (Sacas)', tipo: 'entrada', valor: 'R$ 35.000,00' },
-    { id: '2', data: '05/06/2026', descricao: 'Adubo NPK e Defensivos', tipo: 'saida', valor: 'R$ 8.500,00' },
-    { id: '3', data: '02/06/2026', descricao: 'Manutenção Trator', tipo: 'saida', valor: 'R$ 3.200,00' },
-    { id: '4', data: '28/05/2026', descricao: 'Venda de Milho', tipo: 'entrada', valor: 'R$ 18.400,00' },
-  ];
+  
+  // Estados para armazenar os dados da API
+  const [notas, setNotas] = useState<NotaFiscal[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
 
   const filters = ['Hoje', 'Este Mês', 'Este Ano', 'Personalizado'];
+
+  // Função que busca as notas no backend
+  useEffect(() => {
+    const buscarNotas = async () => {
+      // Se não houver produtor selecionado, não faz nada
+      if (!currentProducer) {
+        setNotas([]);
+        return;
+      }
+
+      setIsLoading(true);
+      try {
+        const token = localStorage.getItem('@AgroPops:token');
+        const response = await fetch(`http://localhost:8080/api/notas/listar/${currentProducer.id}`, {
+          headers: {
+            'Authorization': `Bearer ${token}`
+          }
+        });
+
+        if (response.ok) {
+          const dados = await response.json();
+          setNotas(dados);
+        }
+      } catch (error) {
+        console.error("Erro ao buscar as notas fiscais:", error);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    buscarNotas();
+  }, [currentProducer]); // Recarrega sempre que o produtor mudar!
+
+  // ==========================================
+  // CÁLCULOS FINANCEIROS EM TEMPO REAL
+  // ==========================================
+  const totalEntradas = notas.filter(n => n.tipo === 'ENTRADA').reduce((acc, curr) => acc + curr.valor, 0);
+  const totalSaidas = notas.filter(n => n.tipo === 'SAIDA').reduce((acc, curr) => acc + curr.valor, 0);
+  const saldo = totalEntradas - totalSaidas;
+
+  const totalDedutivel = notas.filter(n => n.tipo === 'SAIDA' && n.isDedutivel).reduce((acc, curr) => acc + curr.valor, 0);
+  const totalNaoDedutivel = totalSaidas - totalDedutivel;
+  const porcentagemDedutivel = totalSaidas > 0 ? Math.round((totalDedutivel / totalSaidas) * 100) : 0;
+
+  // Formatadores
+  const formatBRL = (valor: number) => {
+    return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(valor);
+  };
+
+  const formatarData = (dataString: string) => {
+    if (!dataString) return '';
+    const [ano, mes, dia] = dataString.split('-');
+    return `${dia}/${mes}/${ano}`;
+  };
+
+  const ultimasNotas = notas.slice(0, 4); // Pega apenas as 4 mais recentes para a lista resumida
 
   return (
     <div className="space-y-6">
@@ -63,9 +118,8 @@ export function VisaoGeral() {
         </div>
       </div>
 
-      {/* CARDS DE KPI TRANSFORMADOS EM BOTÕES CLICÁVEIS */}
+      {/* CARDS DE KPI */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        {/* Card Saldo -> Leva para "todas" */}
         <div 
           onClick={() => navigate('/notas', { state: { abaInicial: 'todas' } })}
           className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm flex flex-col justify-between cursor-pointer hover:border-blue-200 hover:shadow-md transition-all"
@@ -78,22 +132,20 @@ export function VisaoGeral() {
               <span className="font-semibold text-gray-500">Saldo Geral</span>
             </div>
             <button 
-              onClick={(e) => { 
-                e.stopPropagation(); 
-                setShowValues(!showValues); 
-              }} 
+              onClick={(e) => { e.stopPropagation(); setShowValues(!showValues); }} 
               className="text-gray-400 hover:text-gray-600 p-1"
             >
               {showValues ? <Eye size={20} /> : <EyeOff size={20} />}
             </button>
           </div>
           <div className="mt-4">
-            <h2 className="text-3xl font-bold text-gray-800">{showValues ? financeData.saldo : 'R$ •••••••'}</h2>
+            <h2 className={`text-3xl font-bold ${saldo < 0 ? 'text-rose-600' : 'text-gray-800'}`}>
+              {showValues ? formatBRL(saldo) : 'R$ •••••••'}
+            </h2>
             <p className="text-sm text-gray-400 mt-1">Disponível em Caixa/Bancos</p>
           </div>
         </div>
 
-        {/* Card Entradas -> Leva pré-filtrado para "entrada" */}
         <div 
           onClick={() => navigate('/notas', { state: { abaInicial: 'entrada' } })}
           className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm flex flex-col justify-between cursor-pointer hover:border-emerald-200 hover:shadow-md transition-all"
@@ -105,12 +157,11 @@ export function VisaoGeral() {
             <span className="font-semibold text-gray-500">Total de Entradas</span>
           </div>
           <div className="mt-4">
-            <h2 className="text-3xl font-bold text-emerald-600">{showValues ? financeData.entradas : 'R$ •••••••'}</h2>
+            <h2 className="text-3xl font-bold text-emerald-600">{showValues ? formatBRL(totalEntradas) : 'R$ •••••••'}</h2>
             <p className="text-sm text-gray-400 mt-1">Vendas e Receitas Fiscais</p>
           </div>
         </div>
 
-        {/* Card Saídas -> Leva pré-filtrado para "saida" */}
         <div 
           onClick={() => navigate('/notas', { state: { abaInicial: 'saida' } })}
           className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm flex flex-col justify-between cursor-pointer hover:border-rose-200 hover:shadow-md transition-all"
@@ -122,7 +173,7 @@ export function VisaoGeral() {
             <span className="font-semibold text-gray-500">Total de Saídas</span>
           </div>
           <div className="mt-4">
-            <h2 className="text-3xl font-bold text-rose-600">{showValues ? financeData.saidas : 'R$ •••••••'}</h2>
+            <h2 className="text-3xl font-bold text-rose-600">{showValues ? formatBRL(totalSaidas) : 'R$ •••••••'}</h2>
             <p className="text-sm text-gray-400 mt-1">Despesas e Compras</p>
           </div>
         </div>
@@ -130,6 +181,7 @@ export function VisaoGeral() {
 
       {/* SEÇÃO INFERIOR */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        
         {/* Classificação LCDPR */}
         <div className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm flex flex-col">
           <div className="flex items-center justify-between mb-6">
@@ -139,39 +191,45 @@ export function VisaoGeral() {
             </h3>
             <span className="text-xs font-semibold bg-gray-100 text-gray-600 px-3 py-1 rounded-full">{activeFilter}</span>
           </div>
+          
           <div className="flex-1 flex flex-col justify-center">
-            <div className="mb-2 flex justify-between text-sm font-semibold">
-              <span className="text-emerald-600">Dedutível ({financeData.porcentagemDedutivel}%)</span>
-              <span className="text-rose-500">Não Dedutível ({100 - financeData.porcentagemDedutivel}%)</span>
-            </div>
-            <div className="w-full h-4 bg-rose-100 rounded-full overflow-hidden flex">
-              <div className="h-full bg-emerald-500 rounded-r-none transition-all duration-1000 ease-out" style={{ width: `${financeData.porcentagemDedutivel}%` }} />
-            </div>
-            
-            {/* VALORES DETALHADOS CLICÁVEIS */}
-            <div className="mt-8 grid grid-cols-2 gap-4">
-              <div 
-                onClick={() => navigate('/notas', { state: { abaInicial: 'saida', filtroFiscal: 'dedutivel' } })}
-                className="p-4 bg-emerald-50/50 rounded-xl border border-emerald-100 cursor-pointer hover:bg-emerald-100 hover:shadow-sm transition-all group"
-              >
-                <div className="flex items-center justify-between">
-                  <p className="text-sm text-gray-500 font-medium">Abate Imposto</p>
-                  <ArrowRight size={14} className="text-emerald-500 opacity-0 group-hover:opacity-100 transition-opacity" />
+            {isLoading ? (
+               <div className="flex justify-center items-center h-full text-gray-400">Processando Livro Caixa...</div>
+            ) : (
+              <>
+                <div className="mb-2 flex justify-between text-sm font-semibold">
+                  <span className="text-emerald-600">Dedutível ({porcentagemDedutivel}%)</span>
+                  <span className="text-rose-500">Não Dedutível ({100 - porcentagemDedutivel}%)</span>
                 </div>
-                <p className="text-xl font-bold text-emerald-700 mt-1">{showValues ? financeData.dedutivel : '••••••'}</p>
-              </div>
-              
-              <div 
-                onClick={() => navigate('/notas', { state: { abaInicial: 'saida', filtroFiscal: 'nao-dedutivel' } })}
-                className="p-4 bg-rose-50/50 rounded-xl border border-rose-100 cursor-pointer hover:bg-rose-100 hover:shadow-sm transition-all group"
-              >
-                <div className="flex items-center justify-between">
-                  <p className="text-sm text-gray-500 font-medium">Despesa Pessoal</p>
-                  <ArrowRight size={14} className="text-rose-500 opacity-0 group-hover:opacity-100 transition-opacity" />
+                <div className="w-full h-4 bg-rose-100 rounded-full overflow-hidden flex">
+                  <div className="h-full bg-emerald-500 rounded-r-none transition-all duration-1000 ease-out" style={{ width: `${porcentagemDedutivel}%` }} />
                 </div>
-                <p className="text-xl font-bold text-rose-700 mt-1">{showValues ? financeData.naoDedutivel : '••••••'}</p>
-              </div>
-            </div>
+                
+                <div className="mt-8 grid grid-cols-2 gap-4">
+                  <div 
+                    onClick={() => navigate('/notas', { state: { abaInicial: 'saida', filtroFiscal: 'dedutivel' } })}
+                    className="p-4 bg-emerald-50/50 rounded-xl border border-emerald-100 cursor-pointer hover:bg-emerald-100 hover:shadow-sm transition-all group"
+                  >
+                    <div className="flex items-center justify-between">
+                      <p className="text-sm text-gray-500 font-medium">Abate Imposto</p>
+                      <ArrowRight size={14} className="text-emerald-500 opacity-0 group-hover:opacity-100 transition-opacity" />
+                    </div>
+                    <p className="text-xl font-bold text-emerald-700 mt-1">{showValues ? formatBRL(totalDedutivel) : '••••••'}</p>
+                  </div>
+                  
+                  <div 
+                    onClick={() => navigate('/notas', { state: { abaInicial: 'saida', filtroFiscal: 'nao-dedutivel' } })}
+                    className="p-4 bg-rose-50/50 rounded-xl border border-rose-100 cursor-pointer hover:bg-rose-100 hover:shadow-sm transition-all group"
+                  >
+                    <div className="flex items-center justify-between">
+                      <p className="text-sm text-gray-500 font-medium">Despesa Pessoal</p>
+                      <ArrowRight size={14} className="text-rose-500 opacity-0 group-hover:opacity-100 transition-opacity" />
+                    </div>
+                    <p className="text-xl font-bold text-rose-700 mt-1">{showValues ? formatBRL(totalNaoDedutivel) : '••••••'}</p>
+                  </div>
+                </div>
+              </>
+            )}
           </div>
         </div>
 
@@ -189,23 +247,30 @@ export function VisaoGeral() {
               Ver Todas <ArrowRight size={16} />
             </button>
           </div>
+          
           <div className="flex-1 overflow-y-auto pr-2 space-y-3">
-            {ultimasNotas.map((nota) => (
-              <div key={nota.id} className="flex items-center justify-between p-3 hover:bg-gray-50 rounded-xl transition-colors border border-transparent hover:border-gray-100">
-                <div className="flex items-center gap-3">
-                  <div className={`w-10 h-10 rounded-full flex items-center justify-center ${nota.tipo === 'entrada' ? 'bg-emerald-100 text-emerald-600' : 'bg-rose-100 text-rose-600'}`}>
-                    {nota.tipo === 'entrada' ? <TrendingUp size={18} /> : <TrendingDown size={18} />}
+            {isLoading ? (
+               <div className="flex justify-center py-10 text-gray-400 text-sm">Carregando notas da SEFAZ...</div>
+            ) : ultimasNotas.length === 0 ? (
+               <div className="flex justify-center py-10 text-gray-400 text-sm">Nenhuma nota encontrada.</div>
+            ) : (
+              ultimasNotas.map((nota) => (
+                <div key={nota.id} className="flex items-center justify-between p-3 hover:bg-gray-50 rounded-xl transition-colors border border-transparent hover:border-gray-100">
+                  <div className="flex items-center gap-3">
+                    <div className={`w-10 h-10 rounded-full flex items-center justify-center ${nota.tipo === 'ENTRADA' ? 'bg-emerald-100 text-emerald-600' : 'bg-rose-100 text-rose-600'}`}>
+                      {nota.tipo === 'ENTRADA' ? <TrendingUp size={18} /> : <TrendingDown size={18} />}
+                    </div>
+                    <div>
+                      <p className="font-semibold text-sm text-gray-800">{nota.descricao}</p>
+                      <p className="text-xs text-gray-400">{formatarData(nota.dataEmissao)}</p>
+                    </div>
                   </div>
-                  <div>
-                    <p className="font-semibold text-sm text-gray-800">{nota.descricao}</p>
-                    <p className="text-xs text-gray-400">{nota.data}</p>
+                  <div className={`font-bold text-sm ${nota.tipo === 'ENTRADA' ? 'text-emerald-600' : 'text-gray-700'}`}>
+                    {nota.tipo === 'ENTRADA' ? '+' : '-'} {showValues ? formatBRL(nota.valor) : '••••••'}
                   </div>
                 </div>
-                <div className={`font-bold text-sm ${nota.tipo === 'entrada' ? 'text-emerald-600' : 'text-gray-700'}`}>
-                  {nota.tipo === 'entrada' ? '+' : '-'} {showValues ? nota.valor : '••••••'}
-                </div>
-              </div>
-            ))}
+              ))
+            )}
           </div>
         </div>
       </div>

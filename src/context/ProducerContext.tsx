@@ -64,9 +64,13 @@ export function ProducerProvider({ children }: { children: ReactNode }) {
           
           if (dadosFormatados.length > 0) {
             setCurrentProducer((prev) => prev ? prev : dadosFormatados[0]);
-          }
+          }} else if (response.status === 401 || response.status === 403) {
+          // Se o Java recusar o Crachá, limpa tudo
+          localStorage.removeItem('@AgroPops:token');
+          localStorage.removeItem('@AgroPops:contador');
+          alert("⏳ A sua sessão expirou por segurança. Por favor, faça login novamente.");
+          window.location.href = '/login'; // Redireciona o usuário na hora
         } else {
-          // Se o Java der um Erro 500 ou 403, vai cair aqui!
           const erroTexto = await response.text();
           console.error("❌ O Java retornou um erro (Status " + response.status + "):", erroTexto);
         }

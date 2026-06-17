@@ -41,7 +41,6 @@ export function Produtores() {
 
   // Conexão com o Spring Boot para Salvar Produtor e Certificado
   const handleSalvar = async () => {
-    // 1. Validação simples
     if (!nome || !cpfCnpj || !inscricaoEstadual || !senhaCertificado) {
       setMessage({
         text: "Por favor, preencha todos os campos obrigatórios.",
@@ -50,7 +49,6 @@ export function Produtores() {
       return;
     }
 
-    // 2. Pegar o ID do Contador Logado
     const contadorData = localStorage.getItem("@AgroPops:contador");
     if (!contadorData) {
       setMessage({
@@ -61,7 +59,6 @@ export function Produtores() {
     }
     const contadorId = JSON.parse(contadorData).id;
 
-    // 3. Montar o "Pacote" (FormData) para envio de ficheiros
     const formData = new FormData();
     formData.append("nome", nome);
     formData.append("cpfCnpj", cpfCnpj);
@@ -77,14 +74,14 @@ export function Produtores() {
     setMessage({ text: "", type: "" });
 
     try {
-      const token = localStorage.getItem('@AgroPops:token'); // <-- PEGA NO CRACHÁ
+      const token = localStorage.getItem('@AgroPops:token');
       
       const response = await fetch(
         "http://localhost:8080/api/produtores/cadastrar",
         {
           method: "POST",
           headers: {
-            'Authorization': `Bearer ${token}` // <-- MOSTRA O CRACHÁ
+            'Authorization': `Bearer ${token}`
           },
           body: formData,
         },
@@ -95,10 +92,9 @@ export function Produtores() {
           text: "Produtor e certificado salvos com sucesso!",
           type: "success",
         });
-        // Fecha o modal e atualiza a lista!
         setTimeout(() => {
           handleCloseModal();
-          carregarProdutores(); // <-- ESTA É A LINHA MÁGICA
+          carregarProdutores();
         }, 2000);
       } else {
         const errorMsg = await response.text();
@@ -154,15 +150,16 @@ export function Produtores() {
         </button>
       </div>
 
-      {/* TABELA DE PRODUTORES (MOCK TEMPORÁRIO) */}
+      {/* TABELA DE PRODUTORES */}
       <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
         <table className="w-full text-left border-collapse">
           <thead>
             <tr className="bg-gray-50 border-b border-gray-100 text-sm text-gray-500">
               <th className="px-6 py-4 font-medium">Nome / Propriedade</th>
               <th className="px-6 py-4 font-medium">Documento</th>
-              <th className="px-6 py-4 font-medium">Inscrição Estadual</th>
+              <th className="px-6 py-4 font-medium">IE</th>
               <th className="px-6 py-4 font-medium">Certificado A1</th>
+              <th className="px-6 py-4 font-medium">Validade</th>
               <th className="px-6 py-4 font-medium text-right">Ações</th>
             </tr>
           </thead>
@@ -173,23 +170,39 @@ export function Produtores() {
                 className="hover:bg-gray-50/50 transition-colors"
               >
                 <td className="px-6 py-4">
-                  <p className="font-semibold text-gray-800">{producer.name}</p>
+                  <p className="font-semibold text-gray-800">{producer.name || producer.nome}</p>
                 </td>
                 <td className="px-6 py-4">
                   <span className="text-sm text-gray-600 font-mono">
-                    {producer.document}
+                    {producer.document || producer.cpfCnpj}
                   </span>
                 </td>
                 <td className="px-6 py-4">
                   <span className="text-sm text-gray-600 font-mono">
-                    {producer.ie}
+                    {producer.ie || producer.inscricaoEstadual}
                   </span>
                 </td>
                 <td className="px-6 py-4">
-                  <div className="flex items-center gap-2 text-emerald-600 bg-emerald-50 px-3 py-1 rounded-full w-fit">
-                    <FileBadge size={14} />
-                    <span className="text-xs font-semibold">Ativo (Mock)</span>
-                  </div>
+                  {producer.validadeCertificado ? (
+                    <div className="flex items-center gap-2 text-emerald-600 bg-emerald-50 px-3 py-1 rounded-full w-fit">
+                      <FileBadge size={14} />
+                      <span className="text-xs font-semibold">Ativo</span>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-2 text-gray-400 bg-gray-50 px-3 py-1 rounded-full w-fit">
+                      <FileBadge size={14} />
+                      <span className="text-xs font-semibold">Pendente</span>
+                    </div>
+                  )}
+                </td>
+                <td className="px-6 py-4">
+                  {producer.validadeCertificado ? (
+                    <span className="text-sm text-gray-800 font-medium">
+                      {new Date(producer.validadeCertificado).toLocaleDateString('pt-BR', { timeZone: 'UTC' })}
+                    </span>
+                  ) : (
+                    <span className="text-sm text-gray-400">-</span>
+                  )}
                 </td>
                 <td className="px-6 py-4 text-right">
                   <button className="p-2 hover:bg-gray-100 rounded-lg text-gray-400 transition-colors">
@@ -267,7 +280,7 @@ export function Produtores() {
                   </div>
                   <div className="space-y-1">
                     <label className="text-sm font-medium text-gray-700">
-                      Inscrição Estadual (Obrigatório)
+                      IE (Inscrição Estadual)
                     </label>
                     <input
                       type="text"
@@ -285,7 +298,6 @@ export function Produtores() {
                   Integração SEFAZ
                 </h3>
 
-                {/* Zona de Upload (Agora clicável e funcional) */}
                 <label className="border-2 border-dashed border-gray-200 rounded-xl p-8 flex flex-col items-center justify-center gap-3 bg-gray-50 hover:bg-gray-100 transition-colors cursor-pointer group">
                   <input
                     type="file"
