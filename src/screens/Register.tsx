@@ -227,6 +227,7 @@ export function Register() {
 
   // Errors
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [apiError, setApiError] = useState('');
 
   useEffect(() => {
     const t = setTimeout(() => setMounted(true), 60);
@@ -276,12 +277,45 @@ export function Register() {
       setStep((s) => s + 1);
       return;
     }
-    // Final submit
+    
+    // Final submit - Conectando com o backend em Java!
     setIsLoading(true);
-    await new Promise((r) => setTimeout(r, 1800));
-    // TODO: substituir pelo call real à API Java
-    navigate('/');
-    setIsLoading(false);
+    setApiError(''); // Limpa erros anteriores
+    
+    try {
+      const response = await fetch('http://localhost:8080/api/contadores/registrar', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        // O body deve ter EXATAMENTE os mesmos nomes das variáveis da sua classe Contador.java
+        body: JSON.stringify({
+          nomeEscritorio: officeName,
+          crc: crc,
+          estado: state,
+          nomeResponsavel: fullName,
+          telefone: phone,
+          email: email,
+          senha: password
+        }),
+      });
+
+      if (response.ok) {
+        // Sucesso: O Java retornou Status 200 OK
+        console.log("Cadastro realizado com sucesso no PostgreSQL!");
+        // Redireciona o usuário para fazer login após se cadastrar
+        navigate('/login');
+      } else {
+        // O Java retornou um erro (ex: E-mail já cadastrado)
+        const errorMsg = await response.text();
+        setApiError(errorMsg);
+      }
+    } catch (error) {
+      console.error("Erro na conexão:", error);
+      setApiError('Servidor indisponível. Verifique se o backend Java está rodando.');
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const anim = (delay: number) => ({
@@ -344,6 +378,13 @@ export function Register() {
               </>
             )}
           </div>
+
+          {/* BANNER DE ERRO DA API JAVA */}
+          {apiError && (
+            <div className="mb-6 flex items-center gap-2.5 bg-rose-50 border border-rose-200 text-rose-700 text-sm font-medium px-4 py-3 rounded-xl" style={anim(130)}>
+              <AlertCircle size={16} className="flex-shrink-0" /> {apiError}
+            </div>
+          )}
 
           {/* Step 0: Escritório */}
           {step === 0 && (

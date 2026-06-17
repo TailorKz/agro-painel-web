@@ -1,9 +1,36 @@
-import { Outlet, NavLink } from 'react-router-dom';
+import { Outlet, NavLink, useNavigate } from 'react-router-dom';
+import { useEffect, useState } from 'react';
 import { useProducer } from '../context/ProducerContext';
 import { LayoutDashboard, Users, FileText, Sliders, Settings, LogOut, ChevronDown, User } from 'lucide-react';
 
 export function DashboardLayout() {
   const { currentProducer, setCurrentProducer, producersList } = useProducer();
+  const navigate = useNavigate();
+  
+  // Estado para guardar o nome do contador logado
+  const [contadorNome, setContadorNome] = useState('Carregando...');
+
+  // Verifica se o utilizador está logado assim que o painel abre
+  useEffect(() => {
+    const contadorData = localStorage.getItem('@AgroPops:contador');
+    const token = localStorage.getItem('@AgroPops:token');
+
+    if (contadorData && token) {
+      const contador = JSON.parse(contadorData);
+      // Pega o nome do responsável ou do escritório
+      setContadorNome(contador.nomeResponsavel || contador.nomeEscritorio);
+    } else {
+      // Se não tiver crachá (token), expulsa para a página de login
+      navigate('/login');
+    }
+  }, [navigate]);
+
+  // Função para Terminar Sessão (Sair)
+  const handleLogout = () => {
+    localStorage.removeItem('@AgroPops:token');
+    localStorage.removeItem('@AgroPops:contador');
+    navigate('/login');
+  };
 
   const menuItems = [
     { icon: <LayoutDashboard size={20} />, label: 'Visão Geral', path: '/' },
@@ -25,7 +52,6 @@ export function DashboardLayout() {
             <span className="font-bold text-lg tracking-wide">Agro POPs</span>
           </div>
 
-          {/* Navegação PRO usando NavLink (muda a cor automaticamente quando ativo) */}
           <nav className="p-4 space-y-1">
             {menuItems.map((item) => (
               <NavLink
@@ -52,12 +78,19 @@ export function DashboardLayout() {
             <div className="w-10 h-10 rounded-full bg-emerald-800 flex items-center justify-center">
               <User size={18} />
             </div>
-            <div>
-              <p className="text-sm font-semibold leading-tight"> Contador nome</p>
+            <div className="overflow-hidden">
+              <p className="text-sm font-semibold leading-tight truncate w-32" title={contadorNome}>
+                {contadorNome}
+              </p>
               <p className="text-xs text-emerald-300/80">Contador</p>
             </div>
           </div>
-          <button className="text-emerald-300 hover:text-white p-1 rounded-lg">
+          {/* Botão de Logout com evento onClick */}
+          <button 
+            onClick={handleLogout}
+            className="text-emerald-300 hover:text-white p-2 rounded-lg hover:bg-emerald-800 transition-colors"
+            title="Terminar Sessão"
+          >
             <LogOut size={18} />
           </button>
         </div>
@@ -65,7 +98,6 @@ export function DashboardLayout() {
 
       {/* ÁREA PRINCIPAL */}
       <div className="flex-1 flex flex-col overflow-hidden">
-        {/* TOPBAR / SELETOR DE CONTEXTO */}
         <header className="h-20 bg-white border-b border-gray-100 flex items-center justify-between px-8 shadow-sm z-10">
           <div className="relative group">
             <label className="absolute -top-2 left-3 bg-white px-1 text-[10px] font-bold text-agro-secondary uppercase">
@@ -92,12 +124,11 @@ export function DashboardLayout() {
           <div className="flex items-center gap-6 text-sm text-gray-500">
             <div>
               <span className="font-semibold text-gray-400">CPF/CNPJ:</span>{' '}
-              <span className="font-mono font-medium text-gray-700">{currentProducer?.document}</span>
+              <span className="font-mono font-medium text-gray-700">{currentProducer?.document || 'Nenhum selecionado'}</span>
             </div>
           </div>
         </header>
 
-        {/* MÁGICA AQUI: O Outlet injeta a tela clicada sem recarregar o menu */}
         <main className="flex-1 overflow-y-auto p-8">
           <Outlet />
         </main>

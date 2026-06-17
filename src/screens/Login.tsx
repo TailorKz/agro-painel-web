@@ -144,15 +144,48 @@ export function Login() {
     setPasswordError(''); return true;
   };
 
-  const handleSubmit = async () => {
+ const handleSubmit = async () => {
     const ok = validateEmail() && validatePassword();
     if (!ok) return;
+
     setIsLoading(true);
     setGlobalError('');
-    await new Promise((r) => setTimeout(r, 1500));
-    // TODO: substituir pelo call real à API Java
-    navigate('/');
-    setIsLoading(false);
+
+    try {
+      const response = await fetch('http://localhost:8080/api/contadores/login', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        // Enviamos o email e a senha (que o Java espera receber via LoginDTO)
+        body: JSON.stringify({ 
+          email: email, 
+          senha: password 
+        }),
+      });
+
+      if (response.ok) {
+        const dadosResposta = await response.json();
+        console.log("Login realizado com sucesso! Dados:", dadosResposta);
+        
+        // --- CÓDIGO NOVO: Guarda o token e os dados no navegador ---
+        localStorage.setItem('@AgroPops:token', dadosResposta.token);
+        localStorage.setItem('@AgroPops:contador', JSON.stringify(dadosResposta.contador));
+        // ------------------------------------------------------------
+        
+        // Redireciona o utilizador para a Dashboard
+        navigate('/');
+      } else {
+        // Se a palavra-passe estiver errada ou o e-mail não existir
+        const errorMsg = await response.text();
+        setGlobalError(errorMsg);
+      }
+    } catch (error) {
+      console.error("Erro na conexão:", error);
+      setGlobalError('Servidor indisponível. Verifique se o backend Java está a correr.');
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const anim = (delay: number) => ({
