@@ -315,14 +315,14 @@ export function Login() {
 
       {/* ── RIGHT: Background + Product highlights ───────────────────── */}
       <div
-        className="hidden lg:flex flex-1 relative flex-col justify-end overflow-hidden"
+        className="hidden lg:flex flex-1 relative flex-col justify-center overflow-hidden"
         style={{ opacity: mounted ? 1 : 0, transition: 'opacity 0.9s ease 150ms' }}
       >
         {/* Background */}
         <div className="absolute inset-0 bg-cover bg-center bg-no-repeat" style={{ backgroundImage: 'url(/fundoagro.png)' }} />
         <div
           className="absolute inset-0"
-          style={{ background: 'linear-gradient(180deg, rgba(5,25,12,0.4) 0%, rgba(5,25,12,0.75) 55%, rgba(5,25,12,0.97) 100%)' }}
+          style={{ background: 'linear-gradient(180deg, rgba(5,25,12,0.4) 0%, rgba(5, 25, 12, 0.84) 55%, rgba(5,25,12,0.97) 100%)' }}
         />
 
         <div className="relative z-10 p-12 pb-10">
@@ -337,7 +337,7 @@ export function Login() {
               <br /><span className="text-emerald-400">simplificada.</span>
             </h2>
             <p className="text-emerald-100/55 text-sm max-w-md mb-8 leading-relaxed">
-              Uma plataforma para o contador gerenciar toda a carteira de produtores rurais — do certificado A1 ao LCDPR — enquanto o produtor faz tudo pelo celular.
+              Uma plataforma para o contador gerenciar toda a carteira de produtores rurais, do certificado A1 ao LCDPR, enquanto o produtor faz tudo pelo celular!
             </p>
           </div>
 
@@ -360,18 +360,7 @@ export function Login() {
           </div>
 
           {/* Stats strip */}
-          <div className="flex items-center gap-6" style={anim(560)}>
-            {[
-              { label: 'Produtores ativos', value: '1.200+' },
-              { label: 'Notas emitidas', value: '18.000+' },
-              { label: 'Estados', value: 'SC e RS' },
-            ].map((s) => (
-              <div key={s.label}>
-                <div className="text-white font-black text-lg leading-none">{s.value}</div>
-                <div className="text-emerald-100/40 text-[10px] mt-0.5 uppercase tracking-wider font-semibold">{s.label}</div>
-              </div>
-            ))}
-          </div>
+        
         </div>
       </div>
     </div>

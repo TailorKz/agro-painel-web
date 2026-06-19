@@ -167,11 +167,11 @@ const stepPreviews = [
       <div className="bg-white/10 border border-white/15 rounded-2xl p-4 space-y-3">
         <div className="flex items-center gap-3 mb-1">
           <div className="w-10 h-10 bg-violet-500/30 rounded-xl flex items-center justify-center">
-            <span className="text-violet-300 font-black text-sm">AP</span>
+            <span className="text-violet-300 font-black text-sm">SN</span>
           </div>
           <div>
-            <div className="text-white font-bold text-sm">Ana Paula Rech</div>
-            <div className="text-emerald-100/50 text-xs">ana@rechcontabilidade.com.br</div>
+            <div className="text-white font-bold text-sm">Seu Nome!</div>
+            <div className="text-emerald-100/50 text-xs">contador@contabilidade.com.br</div>
           </div>
         </div>
         <div className="flex items-center gap-2">
@@ -500,14 +500,14 @@ export function Register() {
 
           <div className="mt-6 flex items-center justify-center gap-2 text-gray-300 text-xs">
             <Shield size={12} />
-            <span>Dados protegidos com criptografia SSL/TLS</span>
+            <span>Dados protegidos e criptografados</span>
           </div>
         </div>
       </div>
 
       {/* ── RIGHT: Background + Step preview ────────────────────────────── */}
       <div
-        className="hidden lg:flex flex-1 relative flex-col justify-end overflow-hidden"
+        className="hidden lg:flex flex-1 relative flex-col justify-center overflow-hidden"
         style={{ opacity: mounted ? 1 : 0, transition: 'opacity 0.9s ease 150ms' }}
       >
         <div className="absolute inset-0 bg-cover bg-center bg-no-repeat" style={{ backgroundImage: 'url(/fundoagro.png)' }} />

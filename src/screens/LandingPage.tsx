@@ -421,101 +421,141 @@ export function LandingPage() {
             </div>
           </div>
 
-          {/* Floating dashboard preview */}
-          <div className="hidden lg:block" style={heroAnim(520, 32)}>
-            <div className="bg-white/10 backdrop-blur-md border border-white/20 rounded-3xl p-6 shadow-2xl">
-              <div className="flex items-center justify-between mb-4">
-                <div className="flex items-center gap-2">
-                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-                  <span className="text-white/70 text-xs font-medium">
-                    SEFAZ Conectado
-                  </span>
-                </div>
-                <span className="text-white/40 text-xs">
-                  João Silva • Chácara Vista Alegre
-                </span>
-              </div>
-              <div className="grid grid-cols-3 gap-3 mb-4">
-                {[
-                  { label: "Saldo", value: "R$ 45.230", color: "text-white" },
-                  { label: "Entradas", value: "R$ 62.000", color: "text-emerald-400" },
-                  { label: "Saídas", value: "R$ 16.770", color: "text-rose-400" },
-                ].map((stat) => (
+            {/* ── Screenshot animado do app ─────────────────────────────── */}
+          <div
+            className="hidden lg:flex items-center justify-center"
+            style={{
+              opacity: heroVisible ? 1 : 0,
+              transition: 'opacity 1s ease 480ms',
+            }}
+          >
+            {/* Wrapper com perspectiva para o efeito 3-D sutil */}
+            <div
+              style={{ perspective: '900px' }}
+              className="w-full max-w-[740px]"
+            >
+              {/* Camada externa: rotação suave + float contínuo */}
+              <div
+                style={{
+                  position: 'relative',
+                  transform: heroVisible
+                    ? 'rotateY(-4deg) rotateX(2deg)'
+                    : 'rotateY(-4deg) rotateX(2deg) translateY(40px)',
+                  transition: 'transform 1.1s cubic-bezier(0.22,1,0.36,1) 520ms',
+                  animation: heroVisible ? 'float-screen 5s ease-in-out infinite' : 'none',
+                  animationDelay: '1.6s',
+                  willChange: 'transform',
+                }}
+              >
+                {/* Glow atrás da imagem */}
+                <div
+                  style={{
+                    position: 'absolute',
+                    inset: '-24px',
+                    borderRadius: '32px',
+                    background: 'radial-gradient(ellipse at 50% 60%, rgba(52,211,153,0.28) 0%, rgba(16,185,129,0.10) 55%, transparent 80%)',
+                    filter: 'blur(18px)',
+                    animation: 'glow-pulse 4s ease-in-out infinite',
+                    animationDelay: '1.8s',
+                    zIndex: 0,
+                  }}
+                />
+ 
+                {/* Container da imagem com borda e sombra premium */}
+                <div
+                  className="relative overflow-hidden"
+                  style={{
+                    borderRadius: '20px',
+                    border: '1px solid rgba(255,255,255,0.18)',
+                    boxShadow: '0 32px 80px rgba(0,0,0,0.55), 0 0 0 1px rgba(52,211,153,0.12), inset 0 1px 0 rgba(255,255,255,0.1)',
+                    zIndex: 1,
+                  }}
+                >
+                  {/* A imagem real do sistema */}
+                  <img
+                    src="/imagem-agro-web.png"
+                    alt="Painel AgroContábil"
+                    className="w-full h-auto block"
+                    style={{ display: 'block' }}
+                    draggable={false}
+                  />
+ 
+                  {/* Shimmer — brilho que passa da esquerda para a direita */}
                   <div
-                    key={stat.label}
-                    className="bg-white/10 rounded-xl p-3 text-center"
-                  >
-                    <div className={`font-black text-sm ${stat.color}`}>
-                      {stat.value}
-                    </div>
-                    <div className="text-white/40 text-[10px] mt-0.5">
-                      {stat.label}
-                    </div>
-                  </div>
-                ))}
-              </div>
-              <div className="bg-white/5 rounded-xl p-4 mb-3">
-                <div className="flex justify-between text-xs mb-2">
-                  <span className="text-emerald-400 font-semibold">
-                    Dedutível LCDPR • 74%
-                  </span>
-                  <span className="text-rose-400 font-semibold">
-                    Pessoal • 26%
-                  </span>
-                </div>
-                <div className="h-3 bg-rose-500/30 rounded-full overflow-hidden">
-                  <div
-                    className="h-full bg-emerald-500 rounded-full"
                     style={{
-                      width: heroVisible ? "74%" : "0%",
-                      transition: "width 1.6s cubic-bezier(0.22,1,0.36,1) 900ms",
+                      position: 'absolute',
+                      inset: 0,
+                      pointerEvents: 'none',
+                      zIndex: 2,
+                      overflow: 'hidden',
+                      borderRadius: '20px',
+                    }}
+                  >
+                    <div
+                      style={{
+                        position: 'absolute',
+                        top: 0,
+                        bottom: 0,
+                        width: '45%',
+                        background: 'linear-gradient(105deg, transparent 0%, rgba(255,255,255,0.09) 45%, rgba(255,255,255,0.18) 50%, rgba(255,255,255,0.09) 55%, transparent 100%)',
+                        animation: 'shimmer-pass 4.5s cubic-bezier(0.4,0,0.2,1) infinite',
+                        animationDelay: '2.2s',
+                      }}
+                    />
+                  </div>
+ 
+                  {/* Vignette suave nas bordas para integrar ao fundo escuro */}
+                  <div
+                    style={{
+                      position: 'absolute',
+                      inset: 0,
+                      borderRadius: '20px',
+                      background: 'linear-gradient(180deg, rgba(0,0,0,0.04) 0%, transparent 20%, transparent 80%, rgba(0,0,0,0.12) 100%)',
+                      pointerEvents: 'none',
+                      zIndex: 3,
                     }}
                   />
                 </div>
-              </div>
-              {[
-                {
-                  icon: "↑",
-                  label: "Venda de Soja",
-                  value: "+ R$ 35.000",
-                  bg: "bg-emerald-500/20",
-                  color: "text-emerald-400",
-                },
-                {
-                  icon: "↓",
-                  label: "Adubo NPK",
-                  value: "- R$ 8.500",
-                  bg: "bg-rose-500/20",
-                  color: "text-rose-400",
-                },
-                {
-                  icon: "↓",
-                  label: "Manutenção Trator",
-                  value: "- R$ 3.200",
-                  bg: "bg-rose-500/20",
-                  color: "text-rose-400",
-                },
-              ].map((item, i) => (
+ 
+                {/* Badge "SEFAZ conectado" flutuando sobre a imagem */}
                 <div
-                  key={i}
-                  className="flex items-center justify-between py-2.5 border-t border-white/5"
+                  style={{
+                    position: 'absolute',
+                    bottom: '-14px',
+                    left: '24px',
+                    zIndex: 10,
+                    opacity: heroVisible ? 1 : 0,
+                    transform: heroVisible ? 'translateY(0)' : 'translateY(12px)',
+                    transition: 'opacity 0.7s ease 1.3s, transform 0.7s ease 1.3s',
+                  }}
                 >
-                  <div className="flex items-center gap-3">
-                    <div
-                      className={`w-7 h-7 rounded-lg ${item.bg} flex items-center justify-center text-xs font-bold ${item.color}`}
-                    >
-                      {item.icon}
-                    </div>
-                    <span className="text-white/70 text-xs">{item.label}</span>
+                  <div
+                    className="flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-semibold"
+                    style={{
+                      background: 'rgba(6,42,20,0.85)',
+                      backdropFilter: 'blur(10px)',
+                      border: '1px solid rgba(52,211,153,0.35)',
+                      boxShadow: '0 4px 20px rgba(0,0,0,0.4)',
+                      color: '#6ee7b7',
+                    }}
+                  >
+                    <span
+                      style={{
+                        width: 7, height: 7, borderRadius: '50%',
+                        background: '#34d399',
+                        boxShadow: '0 0 6px #34d399',
+                        display: 'inline-block',
+                        animation: 'glow-pulse 2s ease-in-out infinite',
+                      }}
+                    />
+                    Sistemas Conectados!
                   </div>
-                  <span className={`text-xs font-bold ${item.color}`}>
-                    {item.value}
-                  </span>
                 </div>
-              ))}
+              </div>
             </div>
           </div>
         </div>
+ 
 
         <div className="absolute bottom-8 left-1/2 -translate-x-1/2 z-10 flex flex-col items-center gap-2 text-white/40">
           <span className="text-[10px] tracking-widest">SCROLL</span>
