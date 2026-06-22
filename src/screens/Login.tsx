@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Eye, EyeOff, ArrowRight, Shield, ChevronLeft, Loader2, AlertCircle,
-  Wifi, Mic, FileCheck,
+  Wifi, Mic, FileCheck, Tractor, Briefcase
 } from 'lucide-react';
 
 // ── Floating label input ──────────────────────────────────────────────────
@@ -58,34 +58,19 @@ function FloatingInput({
   );
 }
 
-// ── Product highlights (replace testimonials) ─────────────────────────────
 const highlights = [
   {
-    icon: Wifi,
-    title: 'SEFAZ sempre atualizado',
-    desc: 'O backend varre a SEFAZ automaticamente e sincroniza todas as notas de entrada e saída do produtor em tempo real no painel e no app.',
-    accent: 'bg-emerald-500/20 text-emerald-300',
+    icon: Wifi, title: 'SEFAZ sempre atualizado', desc: 'O backend varre a SEFAZ automaticamente e sincroniza todas as notas de entrada e saída.', accent: 'bg-emerald-500/20 text-emerald-300',
   },
   {
-    icon: Mic,
-    title: 'NFP-e por voz ou texto',
-    desc: 'O produtor abre o app, descreve a venda como numa mensagem de WhatsApp — áudio ou texto — e a nota é gerada, assinada e enviada à SEFAZ em segundos.',
-    accent: 'bg-sky-500/20 text-sky-300',
+    icon: Mic, title: 'NFP-e por voz ou texto', desc: 'O produtor descreve a venda por áudio ou texto e a nota é gerada, assinada e enviada à SEFAZ.', accent: 'bg-sky-500/20 text-sky-300',
   },
   {
-    icon: FileCheck,
-    title: 'LCDPR gerado automaticamente',
-    desc: 'Entradas, saídas e dedutibilidade são classificadas automaticamente. O Livro Caixa fica pronto para entrega sem nenhum lançamento manual.',
-    accent: 'bg-violet-500/20 text-violet-300',
+    icon: FileCheck, title: 'LCDPR automático', desc: 'Entradas, saídas e dedutibilidade classificadas automaticamente. O Livro Caixa fica pronto.', accent: 'bg-violet-500/20 text-violet-300',
   },
 ];
 
-// ── Animated highlight card ───────────────────────────────────────────────
-function HighlightCard({
-  icon: Icon, title, desc, accent, active,
-}: {
-  icon: React.ElementType; title: string; desc: string; accent: string; active: boolean;
-}) {
+function HighlightCard({ icon: Icon, title, desc, accent, active }: { icon: React.ElementType; title: string; desc: string; accent: string; active: boolean; }) {
   return (
     <div
       className="flex items-start gap-4 p-4 rounded-2xl border transition-all duration-500"
@@ -107,17 +92,27 @@ function HighlightCard({
   );
 }
 
-// ── Main component ────────────────────────────────────────────────────────
 export function Login() {
   const navigate = useNavigate();
+  
+  // TIPO DE ACESSO
+  const [loginType, setLoginType] = useState<'contador' | 'produtor'>('contador');
+
+  // ESTADOS DO CONTADOR
   const [email, setEmail] = useState('');
+  const [emailError, setEmailError] = useState('');
+  
+  // ESTADOS DO PRODUTOR
+  const [documento, setDocumento] = useState('');
+  const [docError, setDocError] = useState('');
+
+  // ESTADOS GERAIS
   const [password, setPassword] = useState('');
+  const [passwordError, setPasswordError] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [rememberMe, setRememberMe] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [globalError, setGlobalError] = useState('');
-  const [emailError, setEmailError] = useState('');
-  const [passwordError, setPasswordError] = useState('');
   const [mounted, setMounted] = useState(false);
   const [activeCard, setActiveCard] = useState(0);
 
@@ -133,56 +128,68 @@ export function Login() {
     return () => clearInterval(interval);
   }, []);
 
-  const validateEmail = () => {
-    if (!email) { setEmailError('Informe seu e-mail'); return false; }
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { setEmailError('E-mail inválido'); return false; }
-    setEmailError(''); return true;
-  };
-  const validatePassword = () => {
-    if (!password) { setPasswordError('Informe sua senha'); return false; }
-    if (password.length < 6) { setPasswordError('Mínimo 6 caracteres'); return false; }
-    setPasswordError(''); return true;
+  const validateFields = () => {
+    let isValid = true;
+    if (loginType === 'contador') {
+      if (!email) { setEmailError('Informe seu e-mail'); isValid = false; }
+      else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { setEmailError('E-mail inválido'); isValid = false; }
+      else { setEmailError(''); }
+    } else {
+      if (!documento) { setDocError('Informe seu CPF ou CNPJ'); isValid = false; }
+      else { setDocError(''); }
+    }
+
+    if (!password) { setPasswordError('Informe sua senha'); isValid = false; }
+    else { setPasswordError(''); }
+
+    return isValid;
   };
 
- const handleSubmit = async () => {
-    const ok = validateEmail() && validatePassword();
-    if (!ok) return;
+  const handleSubmit = async () => {
+    if (!validateFields()) return;
 
     setIsLoading(true);
     setGlobalError('');
 
     try {
-      const response = await fetch('http://localhost:8080/api/contadores/login', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        // Enviamos o email e a senha (que o Java espera receber via LoginDTO)
-        body: JSON.stringify({ 
-          email: email, 
-          senha: password 
-        }),
-      });
+      if (loginType === 'contador') {
+        const response = await fetch('http://localhost:8080/api/contadores/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: email, senha: password }),
+        });
 
-      if (response.ok) {
-        const dadosResposta = await response.json();
-        console.log("Login realizado com sucesso! Dados:", dadosResposta);
-        
-        // --- CÓDIGO NOVO: Guarda o token e os dados no navegador ---
-        localStorage.setItem('@AgroPops:token', dadosResposta.token);
-        localStorage.setItem('@AgroPops:contador', JSON.stringify(dadosResposta.contador));
-        // ------------------------------------------------------------
-        
-        // Redireciona o utilizador para a Dashboard
-        navigate('/');
+        if (response.ok) {
+          const dadosResposta = await response.json();
+          localStorage.setItem('@AgroPops:token', dadosResposta.token);
+          localStorage.setItem('@AgroPops:contador', JSON.stringify(dadosResposta.contador));
+          localStorage.setItem('@AgroPops:userRole', 'CONTADOR'); // Diz ao painel quem é
+          navigate('/');
+        } else {
+          const errorMsg = await response.text();
+          setGlobalError(errorMsg);
+        }
       } else {
-        // Se a palavra-passe estiver errada ou o e-mail não existir
-        const errorMsg = await response.text();
-        setGlobalError(errorMsg);
+        // LÓGICA DO PRODUTOR (Aproveita a rota do App Mobile!)
+        const response = await fetch('http://localhost:8080/api/produtores/login-mobile', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ cpfCnpj: documento, senha: password }),
+        });
+
+        if (response.ok) {
+          const dadosResposta = await response.json();
+          localStorage.setItem('@AgroPops:token', dadosResposta.token);
+          localStorage.setItem('@AgroPops:produtorData', JSON.stringify(dadosResposta.produtor));
+          localStorage.setItem('@AgroPops:userRole', 'PRODUTOR'); // Diz ao painel quem é
+          navigate('/'); // No futuro, isso pode redirecionar para '/dashboard-produtor'
+        } else {
+          setGlobalError("Produtor não encontrado. Verifique seu CPF/CNPJ.");
+        }
       }
     } catch (error) {
       console.error("Erro na conexão:", error);
-      setGlobalError('Servidor indisponível. Verifique se o backend Java está a correr.');
+      setGlobalError('Servidor indisponível. Verifique se o backend Java está rodando.');
     } finally {
       setIsLoading(false);
     }
@@ -196,29 +203,45 @@ export function Login() {
 
   return (
     <div className="min-h-screen flex font-sans antialiased overflow-hidden bg-gray-50">
-
       {/* ── LEFT: Form ──────────────────────────────────────────────────── */}
       <div className="flex-1 flex flex-col justify-center items-center px-6 py-12 relative z-10 bg-white">
         <button
           onClick={() => navigate('/landing')}
           className="absolute top-6 left-6 flex items-center gap-1.5 text-gray-400 hover:text-gray-600 text-sm font-medium transition-colors group"
         >
-          <ChevronLeft size={16} className="group-hover:-translate-x-0.5 transition-transform" />
-          Voltar
+          <ChevronLeft size={16} className="group-hover:-translate-x-0.5 transition-transform" /> Voltar
         </button>
 
         <div className="w-full max-w-sm">
           {/* Logo */}
-          <div style={anim(0)} className="flex items-center gap-3 mb-10">
+          <div style={anim(0)} className="flex items-center gap-3 mb-8">
             <img src="/logo.png" alt="AgroContábil" className="h-10 w-auto object-contain" />
             <h1 className="text-2xl font-black text-gray-800 mb-1">Agro POPs</h1>
           </div>
 
           <div style={anim(80)}>
-            <h1 className="text-2xl font-black text-gray-800 mb-1">Bem-vindo de volta</h1>
-            <p className="text-gray-400 text-sm mb-8">
-              Acesse seu escritório e gerencie sua carteira de produtores rurais.
-            </p>
+            <h1 className="text-2xl font-black text-gray-800 mb-1">Acesso ao Sistema</h1>
+            <p className="text-gray-400 text-sm mb-6">Selecione o seu perfil para prosseguir.</p>
+          </div>
+
+          {/* TOGGLE: CONTADOR / PRODUTOR */}
+          <div className="flex bg-gray-100 p-1.5 rounded-xl mb-6 relative" style={anim(120)}>
+            <button
+              onClick={() => { setLoginType('contador'); setGlobalError(''); }}
+              className={`flex-1 py-2.5 text-sm font-bold rounded-lg flex items-center justify-center gap-2 transition-all duration-300 z-10 ${
+                loginType === 'contador' ? 'text-emerald-700 bg-white shadow-sm' : 'text-gray-500 hover:text-gray-700'
+              }`}
+            >
+              <Briefcase size={16} /> Contador
+            </button>
+            <button
+              onClick={() => { setLoginType('produtor'); setGlobalError(''); }}
+              className={`flex-1 py-2.5 text-sm font-bold rounded-lg flex items-center justify-center gap-2 transition-all duration-300 z-10 ${
+                loginType === 'produtor' ? 'text-emerald-700 bg-white shadow-sm' : 'text-gray-500 hover:text-gray-700'
+              }`}
+            >
+              <Tractor size={16} /> Produtor
+            </button>
           </div>
 
           {/* Global error */}
@@ -230,27 +253,34 @@ export function Login() {
 
           {/* Inputs */}
           <div className="space-y-4" style={anim(160)} onKeyDown={(e) => e.key === 'Enter' && handleSubmit()}>
-            <FloatingInput
-              id="email" label="E-mail do contador" type="email" value={email}
-              onChange={(v) => { setEmail(v); if (emailError) setEmailError(''); }}
-              onBlur={validateEmail} error={emailError} autoComplete="email" disabled={isLoading}
-            />
+            
+            {loginType === 'contador' ? (
+              <FloatingInput
+                id="email" label="E-mail do escritório" type="email" value={email}
+                onChange={(v) => { setEmail(v); if (emailError) setEmailError(''); }}
+                error={emailError} disabled={isLoading}
+              />
+            ) : (
+              <FloatingInput
+                id="documento" label="Seu CPF ou CNPJ" type="text" value={documento}
+                onChange={(v) => { setDocumento(v); if (docError) setDocError(''); }}
+                error={docError} disabled={isLoading}
+              />
+            )}
+
             <FloatingInput
               id="password" label="Senha" type={showPassword ? 'text' : 'password'} value={password}
               onChange={(v) => { setPassword(v); if (passwordError) setPasswordError(''); }}
-              onBlur={validatePassword} error={passwordError} autoComplete="current-password" disabled={isLoading}
+              error={passwordError} disabled={isLoading}
               suffix={
-                <button
-                  type="button" tabIndex={-1} onClick={() => setShowPassword(!showPassword)}
-                  className="text-gray-400 hover:text-gray-600 transition-colors p-1 rounded"
-                >
+                <button type="button" tabIndex={-1} onClick={() => setShowPassword(!showPassword)}
+                  className="text-gray-400 hover:text-gray-600 transition-colors p-1 rounded">
                   {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
                 </button>
               }
             />
           </div>
 
-          {/* Remember + Forgot */}
           <div className="flex items-center justify-between mt-3 mb-6" style={anim(220)}>
             <label className="flex items-center gap-2 cursor-pointer group">
               <div
@@ -258,9 +288,7 @@ export function Login() {
                 onClick={() => setRememberMe(!rememberMe)}
               >
                 {rememberMe && (
-                  <svg width="10" height="8" viewBox="0 0 10 8" fill="none">
-                    <path d="M1 4L3.5 6.5L9 1" stroke="white" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-                  </svg>
+                  <svg width="10" height="8" viewBox="0 0 10 8" fill="none"><path d="M1 4L3.5 6.5L9 1" stroke="white" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>
                 )}
               </div>
               <span className="text-sm text-gray-500 select-none">Lembrar acesso</span>
@@ -282,85 +310,58 @@ export function Login() {
               }`}
             >
               {isLoading
-                ? <><Loader2 size={18} className="animate-spin" /> Verificando credenciais...</>
+                ? <><Loader2 size={18} className="animate-spin" /> Verificando...</>
                 : <>Entrar no painel <ArrowRight size={18} /></>
               }
             </button>
           </div>
 
-          <div className="flex items-center gap-4 my-6" style={anim(340)}>
-            <div className="flex-1 h-px bg-gray-100" />
-            <span className="text-xs text-gray-400 font-medium">OU</span>
-            <div className="flex-1 h-px bg-gray-100" />
-          </div>
-
-          <div className="text-center" style={anim(380)}>
-            <p className="text-sm text-gray-400">
-              Primeiro acesso?{' '}
-              <button
-                onClick={() => navigate('/register')}
-                className="text-emerald-600 font-semibold hover:text-emerald-700 transition-colors"
-              >
-                Criar conta do escritório
-              </button>
-            </p>
-          </div>
+          {loginType === 'contador' && (
+            <>
+              <div className="flex items-center gap-4 my-6" style={anim(340)}>
+                <div className="flex-1 h-px bg-gray-100" />
+                <span className="text-xs text-gray-400 font-medium">OU</span>
+                <div className="flex-1 h-px bg-gray-100" />
+              </div>
+              <div className="text-center" style={anim(380)}>
+                <p className="text-sm text-gray-400">Primeiro acesso?{' '}
+                  <button onClick={() => navigate('/register')} className="text-emerald-600 font-semibold hover:text-emerald-700 transition-colors">
+                    Criar conta do escritório
+                  </button>
+                </p>
+              </div>
+            </>
+          )}
 
           <div className="mt-8 flex items-center justify-center gap-2 text-gray-300 text-xs" style={anim(420)}>
-            <Shield size={12} />
-            <span>Acesso protegido com criptografia SSL/TLS</span>
+            <Shield size={12} /><span>Acesso protegido com criptografia SSL/TLS</span>
           </div>
         </div>
       </div>
 
       {/* ── RIGHT: Background + Product highlights ───────────────────── */}
-      <div
-        className="hidden lg:flex flex-1 relative flex-col justify-center overflow-hidden"
-        style={{ opacity: mounted ? 1 : 0, transition: 'opacity 0.9s ease 150ms' }}
-      >
-        {/* Background */}
+      <div className="hidden lg:flex flex-1 relative flex-col justify-center overflow-hidden" style={{ opacity: mounted ? 1 : 0, transition: 'opacity 0.9s ease 150ms' }}>
         <div className="absolute inset-0 bg-cover bg-center bg-no-repeat" style={{ backgroundImage: 'url(/fundoagro.png)' }} />
-        <div
-          className="absolute inset-0"
-          style={{ background: 'linear-gradient(180deg, rgba(5,25,12,0.4) 0%, rgba(5, 25, 12, 0.84) 55%, rgba(5,25,12,0.97) 100%)' }}
-        />
-
+        <div className="absolute inset-0" style={{ background: 'linear-gradient(180deg, rgba(5,25,12,0.4) 0%, rgba(5, 25, 12, 0.84) 55%, rgba(5,25,12,0.97) 100%)' }} />
         <div className="relative z-10 p-12 pb-10">
-          {/* Headline */}
           <div style={anim(300)}>
             <div className="inline-flex items-center gap-2 bg-emerald-500/20 border border-emerald-400/25 text-emerald-300 text-[10px] font-bold px-3 py-1.5 rounded-full mb-5 tracking-widest uppercase">
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
               CNPJ rural obrigatório — julho 2026
             </div>
-            <h2 className="text-4xl font-black text-white leading-tight mb-3">
-              Gestão fiscal do campo,
-              <br /><span className="text-emerald-400">simplificada.</span>
-            </h2>
+            <h2 className="text-4xl font-black text-white leading-tight mb-3">Gestão fiscal do campo,<br /><span className="text-emerald-400">simplificada.</span></h2>
             <p className="text-emerald-100/55 text-sm max-w-md mb-8 leading-relaxed">
-              Uma plataforma para o contador gerenciar toda a carteira de produtores rurais, do certificado A1 ao LCDPR, enquanto o produtor faz tudo pelo celular!
+              Uma plataforma para o contador gerenciar a carteira e para o produtor acompanhar as finanças da sua propriedade em tempo real.
             </p>
           </div>
-
-          {/* Highlight cards */}
           <div className="space-y-3 mb-8" style={anim(440)}>
-            {highlights.map((h, i) => (
-              <HighlightCard key={i} {...h} active={activeCard === i} />
-            ))}
+            {highlights.map((h, i) => <HighlightCard key={i} {...h} active={activeCard === i} />)}
           </div>
-
-          {/* Dots */}
           <div className="flex gap-1.5 mb-8" style={anim(500)}>
             {highlights.map((_, i) => (
-              <button
-                key={i}
-                onClick={() => setActiveCard(i)}
-                className={`rounded-full transition-all duration-300 ${i === activeCard ? 'w-5 h-1.5 bg-emerald-400' : 'w-1.5 h-1.5 bg-white/25 hover:bg-white/40'}`}
-              />
+              <button key={i} onClick={() => setActiveCard(i)} className={`rounded-full transition-all duration-300 ${i === activeCard ? 'w-5 h-1.5 bg-emerald-400' : 'w-1.5 h-1.5 bg-white/25 hover:bg-white/40'}`} />
             ))}
           </div>
-
-          {/* Stats strip */}
-        
         </div>
       </div>
     </div>

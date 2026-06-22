@@ -1,44 +1,52 @@
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import { useEffect, useState } from 'react';
 import { useProducer } from '../context/ProducerContext';
-import { LayoutDashboard, Users, FileText, Sliders, Settings, LogOut, ChevronDown, User } from 'lucide-react';
+import { LayoutDashboard, Users, FileText, Sliders, Settings, LogOut, ChevronDown, User, Tractor } from 'lucide-react';
 
 export function DashboardLayout() {
   const { currentProducer, setCurrentProducer, producersList } = useProducer();
   const navigate = useNavigate();
   
-  // Estado para guardar o nome do contador logado
-  const [contadorNome, setContadorNome] = useState('Carregando...');
+  const [userName, setUserName] = useState('Carregando...');
+  const [userRole, setUserRole] = useState<'CONTADOR' | 'PRODUTOR' | null>(null);
 
-  // Verifica se o utilizador está logado assim que o painel abre
   useEffect(() => {
-    const contadorData = localStorage.getItem('@AgroPops:contador');
+    const role = localStorage.getItem('@AgroPops:userRole') as 'CONTADOR' | 'PRODUTOR';
     const token = localStorage.getItem('@AgroPops:token');
-
-    if (contadorData && token) {
-      const contador = JSON.parse(contadorData);
-      // Pega o nome do responsável ou do escritório
-      setContadorNome(contador.nomeResponsavel || contador.nomeEscritorio);
+    
+    if (token && role) {
+      setUserRole(role);
+      if (role === 'CONTADOR') {
+        const contador = JSON.parse(localStorage.getItem('@AgroPops:contador') || '{}');
+        setUserName(contador.nomeResponsavel || contador.nomeEscritorio);
+      } else {
+        const produtor = JSON.parse(localStorage.getItem('@AgroPops:produtorData') || '{}');
+        setUserName(produtor.nome);
+      }
     } else {
-      // Se não tiver crachá (token), expulsa para a página de login
       navigate('/login');
     }
   }, [navigate]);
 
-  // Função para Terminar Sessão (Sair)
   const handleLogout = () => {
-    localStorage.removeItem('@AgroPops:token');
-    localStorage.removeItem('@AgroPops:contador');
+    localStorage.clear(); // Limpa token, role, dados do contador e produtor
     navigate('/login');
   };
 
-  const menuItems = [
-    { icon: <LayoutDashboard size={20} />, label: 'Visão Geral', path: '/' },
-    { icon: <Users size={20} />, label: 'Gerenciar Produtores', path: '/produtores' },
-    { icon: <FileText size={20} />, label: 'Notas Fiscais', path: '/notas' },
-    { icon: <Sliders size={20} />, label: 'Regras de NCM', path: '/parametrizacao' },
-    { icon: <Settings size={20} />, label: 'Configurações', path: '/configuracoes' },
-  ];
+  // MENU DINÂMICO: Produtor não vê menus de Gerenciamento ou Regras
+  const menuItems = userRole === 'CONTADOR' 
+    ? [
+        { icon: <LayoutDashboard size={20} />, label: 'Visão Geral', path: '/' },
+        { icon: <Users size={20} />, label: 'Gerenciar Produtores', path: '/produtores' },
+        { icon: <FileText size={20} />, label: 'Notas Fiscais', path: '/notas' },
+        { icon: <Sliders size={20} />, label: 'Regras de NCM', path: '/parametrizacao' },
+        { icon: <Settings size={20} />, label: 'Configurações', path: '/configuracoes' },
+      ]
+    : [
+        { icon: <LayoutDashboard size={20} />, label: 'Minha Propriedade', path: '/' },
+        { icon: <FileText size={20} />, label: 'Minhas Notas', path: '/notas' },
+        { icon: <Settings size={20} />, label: 'Configurações', path: '/configuracoes' },
+      ];
 
   return (
     <div className="flex h-screen bg-agro-background font-sans antialiased overflow-hidden">
@@ -51,7 +59,7 @@ export function DashboardLayout() {
             </div>
             <span className="font-bold text-lg tracking-wide">Agro POPs</span>
           </div>
-
+          
           <nav className="p-4 space-y-1">
             {menuItems.map((item) => (
               <NavLink
@@ -76,16 +84,17 @@ export function DashboardLayout() {
         <div className="p-4 border-t border-emerald-900/50 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-full bg-emerald-800 flex items-center justify-center">
-              <User size={18} />
+              {userRole === 'CONTADOR' ? <User size={18} /> : <Tractor size={18} />}
             </div>
             <div className="overflow-hidden">
-              <p className="text-sm font-semibold leading-tight truncate w-32" title={contadorNome}>
-                {contadorNome}
+              <p className="text-sm font-semibold leading-tight truncate w-32" title={userName}>
+                {userName.split(' ')[0]} {/* Pega só o primeiro nome */}
               </p>
-              <p className="text-xs text-emerald-300/80">Contador</p>
+              <p className="text-xs text-emerald-300/80">
+                {userRole === 'CONTADOR' ? 'Contador' : 'Produtor Rural'}
+              </p>
             </div>
           </div>
-          {/* Botão de Logout com evento onClick */}
           <button 
             onClick={handleLogout}
             className="text-emerald-300 hover:text-white p-2 rounded-lg hover:bg-emerald-800 transition-colors"
@@ -99,27 +108,36 @@ export function DashboardLayout() {
       {/* ÁREA PRINCIPAL */}
       <div className="flex-1 flex flex-col overflow-hidden">
         <header className="h-20 bg-white border-b border-gray-100 flex items-center justify-between px-8 shadow-sm z-10">
-          <div className="relative group">
-            <label className="absolute -top-2 left-3 bg-white px-1 text-[10px] font-bold text-agro-secondary uppercase">
-              Visualizando Dados De:
-            </label>
-            <div className="flex items-center gap-2 border-2 border-gray-200 rounded-xl px-4 py-2.5 bg-gray-50/50 hover:border-agro-secondary cursor-pointer transition-colors min-w-[320px]">
-              <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-              <select
-                className="flex-1 bg-transparent text-sm font-bold text-gray-800 outline-none cursor-pointer appearance-none pr-6"
-                value={currentProducer?.id || ''}
-                onChange={(e) => {
-                  const selected = producersList.find(p => p.id === e.target.value);
-                  setCurrentProducer(selected || null);
-                }}
-              >
-                {producersList.map((producer) => (
-                  <option key={producer.id} value={producer.id}>{producer.name}</option>
-                ))}
-              </select>
-              <ChevronDown size={16} className="text-gray-400 absolute right-4 pointer-events-none" />
+          
+          {/* CABEÇALHO DINÂMICO */}
+          {userRole === 'CONTADOR' ? (
+            <div className="relative group">
+              <label className="absolute -top-2 left-3 bg-white px-1 text-[10px] font-bold text-agro-secondary uppercase">
+                Visualizando Dados De:
+              </label>
+              <div className="flex items-center gap-2 border-2 border-gray-200 rounded-xl px-4 py-2.5 bg-gray-50/50 hover:border-agro-secondary cursor-pointer transition-colors min-w-[320px]">
+                <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                <select
+                  className="flex-1 bg-transparent text-sm font-bold text-gray-800 outline-none cursor-pointer appearance-none pr-6"
+                  value={currentProducer?.id || ''}
+                  onChange={(e) => {
+                    const selected = producersList.find(p => p.id === e.target.value);
+                    setCurrentProducer(selected || null);
+                  }}
+                >
+                  {producersList.map((producer) => (
+                    <option key={producer.id} value={producer.id}>{producer.name}</option>
+                  ))}
+                </select>
+                <ChevronDown size={16} className="text-gray-400 absolute right-4 pointer-events-none" />
+              </div>
             </div>
-          </div>
+          ) : (
+            <div className="flex items-center gap-3">
+              <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+              <h2 className="text-lg font-bold text-gray-800">Sua Propriedade</h2>
+            </div>
+          )}
 
           <div className="flex items-center gap-6 text-sm text-gray-500">
             <div>
