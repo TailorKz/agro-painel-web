@@ -94,7 +94,7 @@ function HighlightCard({ icon: Icon, title, desc, accent, active }: { icon: Reac
 
 export function Login() {
   const navigate = useNavigate();
-  
+  const baseUrl = import.meta.env.VITE_API_URL;
   // TIPO DE ACESSO
   const [loginType, setLoginType] = useState<'contador' | 'produtor'>('contador');
 
@@ -153,7 +153,7 @@ export function Login() {
 
     try {
       if (loginType === 'contador') {
-        const response = await fetch('http://localhost:8080/api/contadores/login', {
+        const response = await fetch(`${baseUrl}/contadores/login`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ email: email, senha: password }),
@@ -170,8 +170,7 @@ export function Login() {
           setGlobalError(errorMsg);
         }
       } else {
-        // LÓGICA DO PRODUTOR (Aproveita a rota do App Mobile!)
-        const response = await fetch('http://localhost:8080/api/produtores/login-mobile', {
+        const response = await fetch(`${baseUrl}/produtores/login-mobile`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ cpfCnpj: documento, senha: password }),
@@ -181,8 +180,8 @@ export function Login() {
           const dadosResposta = await response.json();
           localStorage.setItem('@AgroPops:token', dadosResposta.token);
           localStorage.setItem('@AgroPops:produtorData', JSON.stringify(dadosResposta.produtor));
-          localStorage.setItem('@AgroPops:userRole', 'PRODUTOR'); // Diz ao painel quem é
-          navigate('/'); // No futuro, isso pode redirecionar para '/dashboard-produtor'
+          localStorage.setItem('@AgroPops:userRole', 'PRODUTOR');
+          navigate('/');
         } else {
           setGlobalError("Produtor não encontrado. Verifique seu CPF/CNPJ.");
         }

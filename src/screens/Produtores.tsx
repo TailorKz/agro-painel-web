@@ -12,6 +12,7 @@ import {
 import { useProducer } from "../context/ProducerContext";
 
 export function Produtores() {
+  const baseUrl = import.meta.env.VITE_API_URL;
   const { producersList, carregarProdutores } = useProducer();
 
   // Controlo do Modal
@@ -82,10 +83,8 @@ export function Produtores() {
     try {
       const token = localStorage.getItem('@AgroPops:token');
       
-      const response = await fetch(
-        "http://localhost:8080/api/produtores/cadastrar",
-        {
-          method: "POST",
+      const response = await fetch(`${baseUrl}/produtores/cadastrar`, {
+        method: "POST",
           headers: {
             'Authorization': `Bearer ${token}`
           },

@@ -25,13 +25,14 @@ export function Parametrizacao() {
 
   const contadorData = JSON.parse(localStorage.getItem('@AgroPops:contador') || '{}');
   const contadorId = contadorData.id;
+  const baseUrl = import.meta.env.VITE_API_URL;
 
   const carregarRegras = useCallback(async () => {
     if (!contadorId) return;
     setIsLoading(true);
     try {
       const token = localStorage.getItem('@AgroPops:token');
-      const response = await fetch(`http://localhost:8080/api/regras/listar/${contadorId}`, {
+      const response = await fetch(`${baseUrl}/regras/listar/${contadorId}`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       if (response.ok) {
@@ -85,8 +86,8 @@ export function Parametrizacao() {
       
       // Define a rota e o método dependendo se esta editando ou criando
       const url = isEditing 
-        ? `http://localhost:8080/api/regras/editar/${editingRuleId}`
-        : `http://localhost:8080/api/regras/cadastrar/${contadorId}`;
+        ? `${baseUrl}/regras/editar/${editingRuleId}`
+        : `${baseUrl}/regras/cadastrar/${contadorId}`;
         
       const method = isEditing ? 'PUT' : 'POST';
 
@@ -125,7 +126,7 @@ export function Parametrizacao() {
     if (!window.confirm("Tem a certeza que deseja excluir esta regra?")) return;
     try {
       const token = localStorage.getItem('@AgroPops:token');
-      const response = await fetch(`http://localhost:8080/api/regras/excluir/${id}`, {
+      const response = await fetch(`${baseUrl}/regras/excluir/${id}`, {
         method: 'DELETE',
         headers: { 'Authorization': `Bearer ${token}` }
       });

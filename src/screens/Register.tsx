@@ -208,7 +208,7 @@ export function Register() {
   const [mounted, setMounted] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [panelVisible, setPanelVisible] = useState(false);
-
+const baseUrl = import.meta.env.VITE_API_URL;
   // Step 0: Escritório
   const [officeName, setOfficeName] = useState('');
   const [crc, setCrc] = useState('');
@@ -283,12 +283,11 @@ export function Register() {
     setApiError(''); // Limpa erros anteriores
     
     try {
-      const response = await fetch('http://localhost:8080/api/contadores/registrar', {
+      const response = await fetch(`${baseUrl}/contadores/registrar`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        // O body deve ter EXATAMENTE os mesmos nomes das variáveis da sua classe Contador.java
         body: JSON.stringify({
           nomeEscritorio: officeName,
           crc: crc,

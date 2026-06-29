@@ -9,6 +9,7 @@ export type Producer = {
   name?: string;
   document?: string;
   ie?: string;
+  validadeCertificado?: string | null; // <-- TIPO ADICIONADO AQUI!
 };
 
 type RawProducer = {
@@ -16,6 +17,7 @@ type RawProducer = {
   nome: string;
   cpfCnpj: string;
   inscricaoEstadual: string;
+  validadeCertificado?: string;
 };
 
 type ProducerContextType = {
@@ -24,6 +26,8 @@ type ProducerContextType = {
   producersList: Producer[];
   carregarProdutores: () => Promise<void>;
 };
+
+const baseUrl = import.meta.env.VITE_API_URL;
 
 const ProducerContext = createContext<ProducerContextType | undefined>(undefined);
 
@@ -34,14 +38,10 @@ export function ProducerProvider({ children }: { children: ReactNode }) {
   const carregarProdutores = useCallback(async () => {
     const userRole = localStorage.getItem('@AgroPops:userRole');
 
-    // ====================================================
-    // LÓGICA 1: SE FOR UM PRODUTOR RURAL LOGADO NA WEB
-    // ====================================================
     if (userRole === 'PRODUTOR') {
       const produtorData = localStorage.getItem('@AgroPops:produtorData');
       if (produtorData) {
         const p = JSON.parse(produtorData);
-        // Formata os dados para o padrão que a Visão Geral já espera
         const produtorFormatado: Producer = {
           ...p,
           id: String(p.id),
@@ -49,23 +49,20 @@ export function ProducerProvider({ children }: { children: ReactNode }) {
           document: p.cpfCnpj,
           ie: p.inscricaoEstadual
         };
-        // O produtor só vê a ele mesmo!
         setProducersList([produtorFormatado]);
         setCurrentProducer(produtorFormatado);
       }
-      return; // Para a execução aqui, não precisa buscar a lista do contador
+      return; 
     }
 
-    // ====================================================
-    // LÓGICA 2: SE FOR O CONTADOR (Busca a carteira de clientes)
-    // ====================================================
     const contadorData = localStorage.getItem('@AgroPops:contador');
     if (contadorData) {
       const contadorId = JSON.parse(contadorData).id;
       
       try {
         const token = localStorage.getItem('@AgroPops:token'); 
-        const response = await fetch(`http://localhost:8080/api/produtores/listar/${contadorId}`, {
+        // CORREÇÃO AQUI: Estava o link das notas, agora é o dos produtores!
+        const response = await fetch(`${baseUrl}/produtores/listar/${contadorId}`, {
           headers: {
             'Authorization': `Bearer ${token}`
           }
@@ -86,7 +83,7 @@ export function ProducerProvider({ children }: { children: ReactNode }) {
             setCurrentProducer((prev) => prev ? prev : dadosFormatados[0]);
           }
         } else if (response.status === 401 || response.status === 403) {
-          localStorage.clear(); // Limpa tudo em caso de invasão ou token vencido
+          localStorage.clear();
           alert("⏳ A sua sessão expirou por segurança. Por favor, faça login novamente.");
           window.location.href = '/login';
         }
