@@ -41,15 +41,16 @@ export function Produtores() {
 
   // Conexão com o Spring Boot para Salvar Produtor e Certificado
   const handleSalvar = async () => {
-    if (!nome || !cpfCnpj || !inscricaoEstadual || !senhaCertificado) {
+    // exige apenas os dados cadastrais básicos
+    if (!nome || !cpfCnpj || !inscricaoEstadual) {
       setMessage({
-        text: "Por favor, preencha todos os campos obrigatórios.",
+        text: "Por favor, preencha os dados principais (Nome, CPF/CNPJ e IE).",
         type: "error",
       });
       return;
     }
 
-    const contadorData = localStorage.getItem("@AgroPops:contador");
+   const contadorData = localStorage.getItem("@AgroPops:contador");
     if (!contadorData) {
       setMessage({
         text: "Erro de sessão. Por favor, faça login novamente.",
@@ -63,9 +64,14 @@ export function Produtores() {
     formData.append("nome", nome);
     formData.append("cpfCnpj", cpfCnpj);
     formData.append("inscricaoEstadual", inscricaoEstadual);
-    formData.append("senhaCertificado", senhaCertificado);
     formData.append("contadorId", contadorId);
 
+    // só envia a senha se o utilizador a tiver preenchido
+    if (senhaCertificado) {
+      formData.append("senhaCertificado", senhaCertificado);
+    }
+
+    // só anexa o ficheiro se ele foi selecionado
     if (certificado) {
       formData.append("certificado", certificado);
     }
@@ -330,7 +336,7 @@ export function Produtores() {
                     </p>
                     {!certificado && (
                       <p className="text-xs text-gray-500 mt-1">
-                        Necessário para importar XMLs e emitir notas.
+                        Opcional agora. Poderá anexar mais tarde para buscar notas automáticas.
                       </p>
                     )}
                   </div>
@@ -338,7 +344,7 @@ export function Produtores() {
 
                 <div className="space-y-1">
                   <label className="text-sm font-medium text-gray-700">
-                    Senha do Certificado
+                    Senha do Certificado <span className="text-gray-400 font-normal text-xs">(Opcional)</span>
                   </label>
                   <input
                     type="password"

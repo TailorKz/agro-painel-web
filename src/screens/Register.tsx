@@ -393,7 +393,6 @@ export function Register() {
                 id="officeName" label="Nome do escritório" value={officeName}
                 onChange={(v) => { setOfficeName(v); clearError('officeName'); }}
                 error={errors.officeName} autoComplete="organization"
-                hint="Ex: Silva & Associados Contabilidade"
               />
               <div className="grid grid-cols-2 gap-3">
                 <FloatingInput
