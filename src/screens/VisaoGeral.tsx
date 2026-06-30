@@ -75,7 +75,7 @@ export function VisaoGeral() {
         const parametros = obterParametrosDeData(activeFilter);
 
         const response = await fetch(
-          `${baseUrl}notas/listar/${currentProducer.id}${parametros}`,
+          `${baseUrl}/notas/listar/${currentProducer.id}${parametros}`,
           {
             headers: { Authorization: `Bearer ${token}` },
           },
@@ -140,7 +140,9 @@ export function VisaoGeral() {
         <div>
           <h1 className="text-2xl font-bold text-gray-800">
             Visão Geral{" "}
-            {currentProducer ? `- ${(currentProducer.name || currentProducer.nome || "").split(" ")[0]}` : ""}
+            {currentProducer
+              ? `- ${(currentProducer.name || currentProducer.nome || "").split(" ")[0]}`
+              : ""}
           </h1>
           <p className="text-sm text-gray-500 mt-1">
             Resumo financeiro e fiscal atualizado em tempo real via SEFAZ.
