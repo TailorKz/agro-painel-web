@@ -163,8 +163,8 @@ export function Login() {
           const dadosResposta = await response.json();
           localStorage.setItem('@AgroPops:token', dadosResposta.token);
           localStorage.setItem('@AgroPops:contador', JSON.stringify(dadosResposta.contador));
-          localStorage.setItem('@AgroPops:userRole', 'CONTADOR'); // Diz ao painel quem é
-          navigate('/');
+          localStorage.setItem('@AgroPops:userRole', 'CONTADOR'); 
+          navigate('/app');
         } else {
           const errorMsg = await response.text();
           setGlobalError(errorMsg);
@@ -180,8 +180,8 @@ export function Login() {
           const dadosResposta = await response.json();
           localStorage.setItem('@AgroPops:token', dadosResposta.token);
           localStorage.setItem('@AgroPops:produtorData', JSON.stringify(dadosResposta.produtor));
-          localStorage.setItem('@AgroPops:userRole', 'PRODUTOR');
-          navigate('/');
+          localStorage.setItem('@AgroPops:userRole', 'PRODUTOR'); 
+          navigate('/app');
         } else {
           setGlobalError("Produtor não encontrado. Verifique seu CPF/CNPJ.");
         }
