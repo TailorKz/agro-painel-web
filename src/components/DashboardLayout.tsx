@@ -59,6 +59,9 @@ export function DashboardLayout() {
             icon: <LayoutDashboard size={20} />,
             label: "Visão Geral",
             path: "/app/",
+            // rota-índice: precisa de match exato, senão fica "ativa" para
+            // qualquer sub-rota de /app (veja o NavLink abaixo)
+            end: true,
           },
           {
             icon: <Users size={20} />,
@@ -86,6 +89,7 @@ export function DashboardLayout() {
             icon: <LayoutDashboard size={20} />,
             label: "Minha Propriedade",
             path: "/app/",
+            end: true,
           },
           {
             icon: <FileText size={20} />,
@@ -120,6 +124,7 @@ export function DashboardLayout() {
               <NavLink
                 key={item.path}
                 to={item.path}
+                end={item.end}
                 className={({ isActive }) =>
                   `w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all ${
                     isActive
@@ -219,7 +224,10 @@ export function DashboardLayout() {
           </div>
         </header>
 
-        <main className="flex-1 overflow-y-auto p-8">
+        {/* `relative` faz desta a "moldura" da tela de carregamento: um
+            overlay `absolute inset-0` dentro do Outlet cobre só esta área
+            (conteúdo), sem tapar a sidebar nem o cabeçalho. */}
+        <main className="relative flex-1 overflow-y-auto p-8">
           <Outlet />
         </main>
       </div>

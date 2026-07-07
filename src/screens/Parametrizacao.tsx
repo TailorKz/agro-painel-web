@@ -11,7 +11,7 @@ type RegraNCM = {
 export function Parametrizacao() {
   const [searchTerm, setSearchTerm] = useState('');
   const [rules, setRules] = useState<RegraNCM[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
   const [menuOpenId, setMenuOpenId] = useState<number | null>(null);
 
   // Estados do Modal Unificado (Nova/Editar Regra)
@@ -29,7 +29,6 @@ export function Parametrizacao() {
 
   const carregarRegras = useCallback(async () => {
     if (!contadorId) return;
-    setIsLoading(true);
     try {
       const token = localStorage.getItem('@AgroPops:token');
       const response = await fetch(`${baseUrl}/regras/listar/${contadorId}`, {
@@ -47,6 +46,7 @@ export function Parametrizacao() {
   }, [contadorId]);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     carregarRegras();
   }, [carregarRegras]);
 

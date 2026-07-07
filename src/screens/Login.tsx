@@ -164,7 +164,9 @@ export function Login() {
           localStorage.setItem('@AgroPops:token', dadosResposta.token);
           localStorage.setItem('@AgroPops:contador', JSON.stringify(dadosResposta.contador));
           localStorage.setItem('@AgroPops:userRole', 'CONTADOR'); 
-          navigate('/app');
+          
+          window.location.href = '/app';
+
         } else {
           const errorMsg = await response.text();
           setGlobalError(errorMsg);
@@ -181,7 +183,7 @@ export function Login() {
           localStorage.setItem('@AgroPops:token', dadosResposta.token);
           localStorage.setItem('@AgroPops:produtorData', JSON.stringify(dadosResposta.produtor));
           localStorage.setItem('@AgroPops:userRole', 'PRODUTOR'); 
-          navigate('/app');
+          window.location.href = '/app';
         } else {
           setGlobalError("Produtor não encontrado. Verifique seu CPF/CNPJ.");
         }

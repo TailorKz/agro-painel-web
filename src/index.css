@@ -12,3 +12,74 @@ body {
   margin: 0;
   background-color: var(--color-agro-background);
 }
+
+/* Animações da tela de carregamento do tratorzinho (VisaoGeral) */
+
+/* Tremor sutil do "motor ligado", aplicado ao trator inteiro */
+@keyframes tractor-shake {
+  0%,
+  100% {
+    transform: translate(0, 0) rotate(0deg);
+  }
+  25% {
+    transform: translate(-1px, -0.6px) rotate(-0.6deg);
+  }
+  50% {
+    transform: translate(0.6px, 0.6px) rotate(0.5deg);
+  }
+  75% {
+    transform: translate(-0.6px, 0px) rotate(-0.35deg);
+  }
+}
+
+/* Giro contínuo das rodas (precisa de transform-box: fill-box no elemento) */
+@keyframes wheel-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Fumacinha subindo e sumindo do escapamento, em looping */
+@keyframes smoke-puff {
+  0% {
+    transform: translate(0, 0);
+    opacity: 0;
+  }
+  18% {
+    opacity: 0.55;
+  }
+  100% {
+    transform: translate(11px, -36px);
+    opacity: 0;
+  }
+}
+
+/* Trator atravessando a área de conteúdo até sair da tela */
+@keyframes tractor-exit {
+  0% {
+    transform: translateX(0);
+  }
+  100% {
+    transform: translateX(130vw);
+  }
+}
+
+/* Brilho deslizante na barrinha de progresso indeterminada */
+@keyframes loading-bar-slide {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(340%);
+  }
+}
+
+/* Respeita quem prefere menos movimento na tela */
+@media (prefers-reduced-motion: reduce) {
+  .loading-motion {
+    animation: none !important;
+  }
+}

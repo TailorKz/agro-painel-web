@@ -8,12 +8,11 @@ import {
   EyeOff,
   FileText,
   Calendar,
-  ArrowRight,
   Receipt,
 } from "lucide-react";
 import { useProducer } from "../context/ProducerContext";
+import { TractorLoadingOverlay } from "../components/TractorLoadingOverlay";
 
-// NOVOS TIPOS ATUALIZADOS COM O BACKEND
 type ItemNota = {
   id: number;
   descricao: string;
@@ -21,7 +20,6 @@ type ItemNota = {
   valor: number;
   isDedutivel: boolean;
 };
-
 type NotaFiscal = {
   id: number;
   numero: string;
@@ -34,12 +32,12 @@ type NotaFiscal = {
 
 export function VisaoGeral() {
   const baseUrl = import.meta.env.VITE_API_URL;
-  const { currentProducer } = useProducer();
+  const { currentProducer, isLoadingProducers } = useProducer();
   const navigate = useNavigate();
   const [showValues, setShowValues] = useState(true);
   const [activeFilter, setActiveFilter] = useState("Este Mês");
   const [notas, setNotas] = useState<NotaFiscal[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
+  const [isLoadingNotas, setIsLoadingNotas] = useState(true);
 
   const filters = ["Hoje", "Este Mês", "Este Ano", "Tudo"];
 
@@ -49,7 +47,6 @@ export function VisaoGeral() {
       const tzOffset = data.getTimezoneOffset() * 60000;
       return new Date(data.getTime() - tzOffset).toISOString().split("T")[0];
     };
-
     if (filtro === "Hoje")
       return `?inicio=${formatarISO(hoje)}&fim=${formatarISO(hoje)}`;
     if (filtro === "Este Mês") {
@@ -64,36 +61,41 @@ export function VisaoGeral() {
   };
 
   useEffect(() => {
+    if (isLoadingProducers) return;
+
+    if (!currentProducer) {
+      setNotas([]);
+      setIsLoadingNotas(false);
+      return;
+    }
+
+    let cancelado = false;
     const buscarNotas = async () => {
-      if (!currentProducer) {
-        setNotas([]);
-        return;
-      }
-      setIsLoading(true);
+      setIsLoadingNotas(true);
       try {
         const token = localStorage.getItem("@AgroPops:token");
-        const parametros = obterParametrosDeData(activeFilter);
-
         const response = await fetch(
-          `${baseUrl}/notas/listar/${currentProducer.id}${parametros}`,
+          `${baseUrl}/notas/listar/${currentProducer.id}${obterParametrosDeData(activeFilter)}`,
           {
             headers: { Authorization: `Bearer ${token}` },
           },
         );
-        if (response.ok) {
+        if (!cancelado && response.ok) {
           const dados = await response.json();
           setNotas(dados);
         }
       } catch (error) {
-        console.error("Erro ao buscar notas:", error);
+        console.error(error);
       } finally {
-        setIsLoading(false);
+        if (!cancelado) setIsLoadingNotas(false);
       }
     };
     buscarNotas();
-  }, [currentProducer, activeFilter]);
+    return () => {
+      cancelado = true;
+    };
+  }, [currentProducer?.id, activeFilter, isLoadingProducers]);
 
-  // NOVOS CÁLCULOS FINANCEIROS
   const totalEntradas = notas
     .filter((n) => n.tipo === "ENTRADA")
     .reduce((acc, curr) => acc + curr.valorTotal, 0);
@@ -102,22 +104,17 @@ export function VisaoGeral() {
     .reduce((acc, curr) => acc + curr.valorTotal, 0);
   const saldo = totalEntradas - totalSaidas;
 
-  // A MAGIA DOS ITENS: Soma dedutibilidade linha a linha de cada XML
   let totalDedutivel = 0;
-  let totalNaoDedutivel = 0;
-
   notas
     .filter((n) => n.tipo === "SAIDA")
     .forEach((nota) => {
       nota.itens.forEach((item) => {
-        if (item.isDedutivel) {
-          totalDedutivel += item.valor;
-        } else {
-          totalNaoDedutivel += item.valor;
-        }
+        if (item.isDedutivel) totalDedutivel += item.valor;
       });
     });
 
+  totalDedutivel = Math.min(totalDedutivel, totalSaidas);
+  const totalNaoDedutivel = Math.max(0, totalSaidas - totalDedutivel);
   const porcentagemDedutivel =
     totalSaidas > 0 ? Math.round((totalDedutivel / totalSaidas) * 100) : 0;
 
@@ -131,11 +128,14 @@ export function VisaoGeral() {
     const [ano, mes, dia] = dataString.split("-");
     return `${dia}/${mes}/${ano}`;
   };
-
-  const ultimasNotas = notas.slice(0, 4);
+const ultimasNotas = notas.slice(0, 4);
+  const carregando = isLoadingProducers || isLoadingNotas; 
+  const exibirTelaInicial = carregando;
 
   return (
     <div className="space-y-6">
+      <TractorLoadingOverlay ativo={exibirTelaInicial} />
+
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-gray-800">
@@ -148,17 +148,12 @@ export function VisaoGeral() {
             Resumo financeiro e fiscal atualizado em tempo real via SEFAZ.
           </p>
         </div>
-
         <div className="flex items-center gap-2 bg-white p-1 rounded-xl border border-gray-200 shadow-sm">
           {filters.map((filter) => (
             <button
               key={filter}
               onClick={() => setActiveFilter(filter)}
-              className={`px-4 py-1.5 text-sm font-medium rounded-lg transition-colors ${
-                activeFilter === filter
-                  ? "bg-agro-secondary text-white shadow-sm"
-                  : "text-gray-600 hover:bg-gray-100"
-              }`}
+              className={`px-4 py-1.5 text-sm font-medium rounded-lg transition-colors ${activeFilter === filter ? "bg-agro-secondary text-white shadow-sm" : "text-gray-600 hover:bg-gray-100"}`}
             >
               {filter === "Tudo" ? (
                 <Calendar size={16} className="inline-block" />
@@ -171,7 +166,14 @@ export function VisaoGeral() {
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <div className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm flex flex-col justify-between">
+        <div
+          onClick={() =>
+            navigate("/app/notas", {
+              state: { abaInicial: "todas", periodoInicial: activeFilter },
+            })
+          }
+          className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm flex flex-col justify-between cursor-pointer hover:shadow-md hover:scale-105 transition-all"
+        >
           <div className="flex justify-between items-start">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 rounded-full bg-blue-50 text-blue-600 flex items-center justify-center">
@@ -180,7 +182,10 @@ export function VisaoGeral() {
               <span className="font-semibold text-gray-500">Saldo Geral</span>
             </div>
             <button
-              onClick={() => setShowValues(!showValues)}
+              onClick={(e) => {
+                e.stopPropagation();
+                setShowValues(!showValues);
+              }}
               className="text-gray-400 hover:text-gray-600 p-1"
             >
               {showValues ? <Eye size={20} /> : <EyeOff size={20} />}
@@ -195,7 +200,14 @@ export function VisaoGeral() {
           </div>
         </div>
 
-        <div className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm flex flex-col justify-between">
+        <div
+          onClick={() =>
+            navigate("/app/notas", {
+              state: { abaInicial: "entrada", periodoInicial: activeFilter },
+            })
+          }
+          className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm flex flex-col justify-between cursor-pointer hover:shadow-md hover:scale-105 transition-all"
+        >
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-full bg-emerald-50 text-emerald-600 flex items-center justify-center">
               <TrendingUp size={20} />
@@ -211,7 +223,14 @@ export function VisaoGeral() {
           </div>
         </div>
 
-        <div className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm flex flex-col justify-between">
+        <div
+          onClick={() =>
+            navigate("/app/notas", {
+              state: { abaInicial: "saida", periodoInicial: activeFilter },
+            })
+          }
+          className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm flex flex-col justify-between cursor-pointer hover:shadow-md hover:scale-105 transition-all"
+        >
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-full bg-rose-50 text-rose-600 flex items-center justify-center">
               <TrendingDown size={20} />
@@ -237,9 +256,8 @@ export function VisaoGeral() {
               {activeFilter}
             </span>
           </div>
-
           <div className="flex-1 flex flex-col justify-center">
-            {isLoading ? (
+            {carregando ? (
               <div className="flex justify-center items-center h-full text-gray-400">
                 Processando Livro Caixa...
               </div>
@@ -259,7 +277,6 @@ export function VisaoGeral() {
                     style={{ width: `${porcentagemDedutivel}%` }}
                   />
                 </div>
-
                 <div className="mt-8 grid grid-cols-2 gap-4">
                   <div className="p-4 bg-emerald-50/50 rounded-xl border border-emerald-100">
                     <p className="text-sm text-gray-500 font-medium">
@@ -290,9 +307,8 @@ export function VisaoGeral() {
               Últimas Notas Importadas
             </h3>
           </div>
-
           <div className="flex-1 overflow-y-auto pr-2 space-y-3">
-            {isLoading ? (
+            {carregando ? (
               <div className="flex justify-center py-10 text-gray-400 text-sm">
                 Carregando...
               </div>
