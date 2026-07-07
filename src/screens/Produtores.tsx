@@ -51,7 +51,7 @@ export function Produtores() {
       return;
     }
 
-   const contadorData = localStorage.getItem("@AgroPops:contador");
+    const contadorData = localStorage.getItem("@AgroPops:contador");
     if (!contadorData) {
       setMessage({
         text: "Erro de sessão. Por favor, faça login novamente.",
@@ -81,16 +81,15 @@ export function Produtores() {
     setMessage({ text: "", type: "" });
 
     try {
-      const token = localStorage.getItem('@AgroPops:token');
-      
+      const token = localStorage.getItem("@AgroPops:token");
+
       const response = await fetch(`${baseUrl}/produtores/cadastrar`, {
         method: "POST",
-          headers: {
-            'Authorization': `Bearer ${token}`
-          },
-          body: formData,
+        headers: {
+          Authorization: `Bearer ${token}`,
         },
-      );
+        body: formData,
+      });
 
       if (response.ok) {
         setMessage({
@@ -175,7 +174,9 @@ export function Produtores() {
                 className="hover:bg-gray-50/50 transition-colors"
               >
                 <td className="px-6 py-4">
-                  <p className="font-semibold text-gray-800">{producer.name || producer.nome}</p>
+                  <p className="font-semibold text-gray-800">
+                    {producer.name || producer.nome}
+                  </p>
                 </td>
                 <td className="px-6 py-4">
                   <span className="text-sm text-gray-600 font-mono">
@@ -203,7 +204,9 @@ export function Produtores() {
                 <td className="px-6 py-4">
                   {producer.validadeCertificado ? (
                     <span className="text-sm text-gray-800 font-medium">
-                      {new Date(producer.validadeCertificado).toLocaleDateString('pt-BR', { timeZone: 'UTC' })}
+                      {new Date(
+                        producer.validadeCertificado,
+                      ).toLocaleDateString("pt-BR", { timeZone: "UTC" })}
                     </span>
                   ) : (
                     <span className="text-sm text-gray-400">-</span>
@@ -335,7 +338,8 @@ export function Produtores() {
                     </p>
                     {!certificado && (
                       <p className="text-xs text-gray-500 mt-1">
-                        Opcional agora. Poderá anexar mais tarde para buscar notas automáticas.
+                        Opcional agora. Poderá anexar mais tarde para buscar
+                        notas automáticas.
                       </p>
                     )}
                   </div>
@@ -343,7 +347,10 @@ export function Produtores() {
 
                 <div className="space-y-1">
                   <label className="text-sm font-medium text-gray-700">
-                    Senha do Certificado <span className="text-gray-400 font-normal text-xs">(Opcional)</span>
+                    Senha do Certificado{" "}
+                    <span className="text-gray-400 font-normal text-xs">
+                      (Opcional)
+                    </span>
                   </label>
                   <input
                     type="password"

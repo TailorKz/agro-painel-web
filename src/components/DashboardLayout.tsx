@@ -11,16 +11,20 @@ import {
   ChevronDown,
   User,
   Tractor,
+  ShieldAlert,
+  ArrowLeftCircle,
 } from "lucide-react";
 
 export function DashboardLayout() {
   const { currentProducer, setCurrentProducer, producersList } = useProducer();
   const navigate = useNavigate();
-
   const [userName, setUserName] = useState("Carregando...");
   const [userRole, setUserRole] = useState<"CONTADOR" | "PRODUTOR" | null>(
     null,
   );
+
+  // VERIFICA SE O ADMIN ESTÁ DISFARÇADO (IMPERSONATION)
+  const isImpersonating = !!localStorage.getItem("@AgroPops:adminBackupToken");
 
   useEffect(() => {
     const role = localStorage.getItem("@AgroPops:userRole") as
@@ -47,11 +51,32 @@ export function DashboardLayout() {
   }, [navigate]);
 
   const handleLogout = () => {
-    localStorage.clear(); // Limpa token, role, dados do contador e produtor
-    window.location.href = "/login"; // Força a recarga da página, limpando a memória do React
+    localStorage.clear();
+    window.location.href = "/login";
   };
 
-  // MENU DINÂMICO: Produtor não vê menus de Gerenciamento ou Regras
+  // FUNÇÃO DE VOLTAR PARA O MODO DEUS
+  const handleReturnToAdmin = () => {
+    const backupToken = localStorage.getItem("@AgroPops:adminBackupToken");
+    const backupUser = localStorage.getItem("@AgroPops:adminBackupUser");
+
+    if (backupToken && backupUser) {
+      // 1. Restaura a identidade do Admin
+      localStorage.setItem("@AgroPops:token", backupToken);
+      localStorage.setItem("@AgroPops:user", backupUser);
+      localStorage.setItem("@AgroPops:userRole", "ADMIN");
+
+      // 2. Limpa os vestígios do cliente e os backups
+      localStorage.removeItem("@AgroPops:adminBackupToken");
+      localStorage.removeItem("@AgroPops:adminBackupUser");
+      localStorage.removeItem("@AgroPops:contador");
+      localStorage.removeItem("@AgroPops:produtorData");
+
+      // 3. Volta exatamente para a aba de gestão de contadores
+      window.location.href = "/admin/dashboard/contadores";
+    }
+  };
+
   const menuItems =
     userRole === "CONTADOR"
       ? [
@@ -59,8 +84,6 @@ export function DashboardLayout() {
             icon: <LayoutDashboard size={20} />,
             label: "Visão Geral",
             path: "/app/",
-            // rota-índice: precisa de match exato, senão fica "ativa" para
-            // qualquer sub-rota de /app (veja o NavLink abaixo)
             end: true,
           },
           {
@@ -106,7 +129,7 @@ export function DashboardLayout() {
   return (
     <div className="flex h-screen bg-agro-background font-sans antialiased overflow-hidden">
       {/* SIDEBAR */}
-      <aside className="w-64 bg-agro-primary text-white flex flex-col justify-between border-r border-emerald-950">
+      <aside className="w-64 bg-agro-primary text-white flex flex-col justify-between border-r border-emerald-950 z-20 relative">
         <div>
           <div className="p-6 border-b border-emerald-900/50 flex items-center gap-3">
             <div className="w-8 h-8 rounded-lg bg-agro-light flex items-center justify-center font-bold text-agro-primary">
@@ -155,7 +178,7 @@ export function DashboardLayout() {
                 className="text-sm font-semibold leading-tight truncate w-32"
                 title={userName}
               >
-                {userName.split(" ")[0]} {/* Pega só o primeiro nome */}
+                {userName.split(" ")[0]}
               </p>
               <p className="text-xs text-emerald-300/80">
                 {userRole === "CONTADOR" ? "Contador" : "Produtor Rural"}
@@ -173,9 +196,27 @@ export function DashboardLayout() {
       </aside>
 
       {/* ÁREA PRINCIPAL */}
-      <div className="flex-1 flex flex-col overflow-hidden">
-        <header className="h-20 bg-white border-b border-gray-100 flex items-center justify-between px-8 shadow-sm z-10">
-          {/* CABEÇALHO DINÂMICO */}
+      <div className="flex-1 flex flex-col overflow-hidden relative">
+        {/* BANNER DE AUDITORIA (GOD MODE) */}
+        {isImpersonating && (
+          <div className="bg-slate-900 text-slate-300 px-6 py-2.5 flex items-center justify-between z-30 shadow-md">
+            <div className="flex items-center gap-3 text-sm">
+              <ShieldAlert size={18} className="text-amber-400" />
+              <span>
+                <strong>Modo Auditoria:</strong> Você está visualizando e
+                controlando o painel como cliente.
+              </span>
+            </div>
+            <button
+              onClick={handleReturnToAdmin}
+              className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 text-white px-4 py-1.5 rounded-lg text-sm font-bold transition-colors border border-slate-700"
+            >
+              <ArrowLeftCircle size={16} /> Encerrar e Voltar
+            </button>
+          </div>
+        )}
+
+        <header className="h-20 bg-white border-b border-gray-100 flex items-center justify-between px-8 shadow-sm z-10 shrink-0">
           {userRole === "CONTADOR" ? (
             <div className="relative group">
               <label className="absolute -top-2 left-3 bg-white px-1 text-[10px] font-bold text-agro-secondary uppercase">
@@ -213,7 +254,6 @@ export function DashboardLayout() {
               </h2>
             </div>
           )}
-
           <div className="flex items-center gap-6 text-sm text-gray-500">
             <div>
               <span className="font-semibold text-gray-400">CPF/CNPJ:</span>{" "}
@@ -224,9 +264,6 @@ export function DashboardLayout() {
           </div>
         </header>
 
-        {/* `relative` faz desta a "moldura" da tela de carregamento: um
-            overlay `absolute inset-0` dentro do Outlet cobre só esta área
-            (conteúdo), sem tapar a sidebar nem o cabeçalho. */}
         <main className="relative flex-1 overflow-y-auto p-8">
           <Outlet />
         </main>
