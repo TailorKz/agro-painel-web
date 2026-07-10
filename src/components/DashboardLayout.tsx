@@ -11,6 +11,7 @@ import {
   ChevronDown,
   User,
   Tractor,
+  BookText
 } from "lucide-react";
 
 export function DashboardLayout() {
@@ -47,11 +48,10 @@ export function DashboardLayout() {
   }, [navigate]);
 
   const handleLogout = () => {
-    localStorage.clear(); // Limpa token, role, dados do contador e produtor
-    window.location.href = "/login"; // Força a recarga da página, limpando a memória do React
+    localStorage.clear();
+    window.location.href = "/login";
   };
 
-  // MENU DINÂMICO: Produtor não vê menus de Gerenciamento ou Regras
   const menuItems =
     userRole === "CONTADOR"
       ? [
@@ -59,8 +59,6 @@ export function DashboardLayout() {
             icon: <LayoutDashboard size={20} />,
             label: "Visão Geral",
             path: "/app/",
-            // rota-índice: precisa de match exato, senão fica "ativa" para
-            // qualquer sub-rota de /app (veja o NavLink abaixo)
             end: true,
           },
           {
@@ -79,6 +77,16 @@ export function DashboardLayout() {
             path: "/app/parametrizacao",
           },
           {
+            icon: <BookText size={20} />,
+            label: "Livro Caixa",
+            path: "/app/livro-caixa",
+          },
+          {
+            icon: <Settings size={20} />,
+            label: "Calculadora IRPR",
+            path: "/app/calculadora-irpr",
+          },
+          {
             icon: <Settings size={20} />,
             label: "Configurações",
             path: "/app/configuracoes",
@@ -95,6 +103,11 @@ export function DashboardLayout() {
             icon: <FileText size={20} />,
             label: "Minhas Notas",
             path: "/app/notas",
+          },
+          {
+            icon: <BookText size={20} />, // <-- O PRODUTOR TAMBÉM VÊ O SEU PRÓPRIO LIVRO CAIXA
+            label: "Livro Caixa",
+            path: "/app/livro-caixa",
           },
           {
             icon: <Settings size={20} />,
@@ -155,7 +168,7 @@ export function DashboardLayout() {
                 className="text-sm font-semibold leading-tight truncate w-32"
                 title={userName}
               >
-                {userName.split(" ")[0]} {/* Pega só o primeiro nome */}
+                {userName.split(" ")[0]}
               </p>
               <p className="text-xs text-emerald-300/80">
                 {userRole === "CONTADOR" ? "Contador" : "Produtor Rural"}
@@ -175,7 +188,6 @@ export function DashboardLayout() {
       {/* ÁREA PRINCIPAL */}
       <div className="flex-1 flex flex-col overflow-hidden">
         <header className="h-20 bg-white border-b border-gray-100 flex items-center justify-between px-8 shadow-sm z-10">
-          {/* CABEÇALHO DINÂMICO */}
           {userRole === "CONTADOR" ? (
             <div className="relative group">
               <label className="absolute -top-2 left-3 bg-white px-1 text-[10px] font-bold text-agro-secondary uppercase">
@@ -224,9 +236,6 @@ export function DashboardLayout() {
           </div>
         </header>
 
-        {/* `relative` faz desta a "moldura" da tela de carregamento: um
-            overlay `absolute inset-0` dentro do Outlet cobre só esta área
-            (conteúdo), sem tapar a sidebar nem o cabeçalho. */}
         <main className="relative flex-1 overflow-y-auto p-8">
           <Outlet />
         </main>
