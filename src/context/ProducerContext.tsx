@@ -12,17 +12,19 @@ export type Producer = {
   id: string;
   nome: string;
   cpfCnpj: string;
+  cnpj?: string;
   inscricaoEstadual: string;
   name?: string;
   document?: string;
   ie?: string;
-  validadeCertificado?: string | null; // <-- TIPO ADICIONADO AQUI!
+  validadeCertificado?: string | null;
 };
 
 type RawProducer = {
   id: number;
   nome: string;
   cpfCnpj: string;
+  cnpj?: string;
   inscricaoEstadual: string;
   validadeCertificado?: string;
 };
@@ -88,7 +90,6 @@ export function ProducerProvider({ children }: { children: ReactNode }) {
 
         try {
           const token = localStorage.getItem("@AgroPops:token");
-          // CORREÇÃO AQUI: Estava o link das notas, agora é o dos produtores!
           const response = await fetch(
             `${baseUrl}/produtores/listar/${contadorId}`,
             {
@@ -106,12 +107,13 @@ export function ProducerProvider({ children }: { children: ReactNode }) {
               name: p.nome,
               document: p.cpfCnpj,
               ie: p.inscricaoEstadual,
+              cnpj: p.cnpj
             }));
 
             setProducersList(dadosFormatados);
 
-            // BLINDAGEM DE ESTADO: Se o novo contador tem produtores, seleciona o primeiro.
-            // Se não tem, força o estado para NULL, limpando o lixo do contador anterior!
+            // Se o novo contador tem produtores, seleciona o primeiro.
+            // Se não tem, força o estado para NULL, limpando o lixo do contador anterior
             if (dadosFormatados.length > 0) {
               setCurrentProducer(dadosFormatados[0]);
             } else {
@@ -153,6 +155,7 @@ export function ProducerProvider({ children }: { children: ReactNode }) {
   );
 }
 
+// eslint-disable-next-line react-refresh/only-export-components
 export function useProducer() {
   const context = useContext(ProducerContext);
   if (!context)

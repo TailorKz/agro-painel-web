@@ -81,6 +81,7 @@ export function AdminContadores() {
   const [formProdutor, setFormProdutor] = useState({
     nome: "",
     cpfCnpj: "",
+    cnpj: "",
     inscricaoEstadual: "",
     senha: "",
     contadorId: "",
@@ -277,6 +278,7 @@ export function AdminContadores() {
       const formData = new FormData();
       formData.append("nome", formProdutor.nome);
       formData.append("cpfCnpj", formProdutor.cpfCnpj);
+      if (formProdutor.cnpj) formData.append("cnpj", formProdutor.cnpj);
       formData.append("inscricaoEstadual", formProdutor.inscricaoEstadual);
       if (formProdutor.senha) formData.append("senha", formProdutor.senha);
       if (formProdutor.contadorId)

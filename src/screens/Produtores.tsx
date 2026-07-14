@@ -21,6 +21,7 @@ export function Produtores() {
   // Estados do Formulário
   const [nome, setNome] = useState("");
   const [cpfCnpj, setCpfCnpj] = useState("");
+  const [cnpj, setCnpj] = useState("");
   const [inscricaoEstadual, setInscricaoEstadual] = useState("");
   const [senhaCertificado, setSenhaCertificado] = useState("");
   const [certificado, setCertificado] = useState<File | null>(null);
@@ -34,6 +35,7 @@ export function Produtores() {
     setIsModalOpen(false);
     setNome("");
     setCpfCnpj("");
+    setCnpj("");
     setInscricaoEstadual("");
     setSenhaCertificado("");
     setCertificado(null);
@@ -64,6 +66,7 @@ export function Produtores() {
     const formData = new FormData();
     formData.append("nome", nome);
     formData.append("cpfCnpj", cpfCnpj);
+    if (cnpj) formData.append("cnpj", cnpj);
     formData.append("inscricaoEstadual", inscricaoEstadual);
     formData.append("contadorId", contadorId);
 
@@ -263,39 +266,22 @@ export function Produtores() {
                 <h3 className="text-sm font-bold text-gray-400 uppercase tracking-wider">
                   Dados Principais
                 </h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div className="space-y-1">
-                    <label className="text-sm font-medium text-gray-700">
-                      Nome Completo / Propriedade
-                    </label>
-                    <input
-                      type="text"
-                      value={nome}
-                      onChange={(e) => setNome(e.target.value)}
-                      className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:border-agro-light focus:ring-2 focus:ring-agro-light/20 outline-none"
-                    />
+                    <label className="text-sm font-medium text-gray-700">Nome Completo / Propriedade</label>
+                    <input type="text" value={nome} onChange={(e) => setNome(e.target.value)} className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:border-agro-light outline-none" required />
                   </div>
                   <div className="space-y-1">
-                    <label className="text-sm font-medium text-gray-700">
-                      CPF ou CNPJ
-                    </label>
-                    <input
-                      type="text"
-                      value={cpfCnpj}
-                      onChange={(e) => setCpfCnpj(e.target.value)}
-                      className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:border-agro-light focus:ring-2 focus:ring-agro-light/20 outline-none"
-                    />
+                    <label className="text-sm font-medium text-gray-700">CPF (Obrigatório)</label>
+                    <input type="text" placeholder="Utilizado para o Login" value={cpfCnpj} onChange={(e) => setCpfCnpj(e.target.value.replace(/\D/g, ''))} className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:border-agro-light outline-none" required />
                   </div>
                   <div className="space-y-1">
-                    <label className="text-sm font-medium text-gray-700">
-                      IE (Inscrição Estadual)
-                    </label>
-                    <input
-                      type="text"
-                      value={inscricaoEstadual}
-                      onChange={(e) => setInscricaoEstadual(e.target.value)}
-                      className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:border-agro-light focus:ring-2 focus:ring-agro-light/20 outline-none"
-                    />
+                    <label className="text-sm font-medium text-gray-700">CNPJ Rural (Opcional)</label>
+                    <input type="text" placeholder="Apenas números" value={cnpj} onChange={(e) => setCnpj(e.target.value.replace(/\D/g, ''))} className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:border-agro-light outline-none" />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-sm font-medium text-gray-700">IE (Inscrição Estadual)</label>
+                    <input type="text" value={inscricaoEstadual} onChange={(e) => setInscricaoEstadual(e.target.value)} className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:border-agro-light outline-none" required />
                   </div>
                 </div>
               </div>
