@@ -17,12 +17,13 @@ import {
 import { useProducer } from "../context/ProducerContext";
 import { TractorLoadingOverlay } from "../components/TractorLoadingOverlay";
 
+
 type ItemNota = { id: number; descricao: string; ncm: string; valor: number; isDedutivel: boolean; };
 type NotaFiscal = { id: number; numero: string; dataEmissao: string; tipo: "ENTRADA" | "SAIDA"; valorTotal: number; empresaEnvolvida: string; itens: ItemNota[]; };
 
 export function VisaoGeral() {
   const baseUrl = import.meta.env.VITE_API_URL;
-  const { currentProducer, isLoadingProducers } = useProducer();
+  const { currentProducer, isLoadingProducers, currentProperty } = useProducer();
   const navigate = useNavigate();
   
   const [showValues, setShowValues] = useState(true);
@@ -145,22 +146,25 @@ export function VisaoGeral() {
 
   // --- MOTOR DE CÁLCULO INTELIGENTE (COERENTE COM O SIMULADOR) ---
   const metricasFinanceiras = useMemo(() => {
-    const totalEntradas = notas.filter((n) => n.tipo === "ENTRADA").reduce((acc, curr) => acc + curr.valorTotal, 0);
-    const totalSaidas = notas.filter((n) => n.tipo === "SAIDA").reduce((acc, curr) => acc + curr.valorTotal, 0);
+    // Se houver uma propriedade selecionada, aplica a porcentagem. Se não, é 100% (1).
+    const multiplicador = currentProperty ? (currentProperty.percentualParticipacao / 100) : 1;
+
+    const totalEntradas = notas.filter((n) => n.tipo === "ENTRADA").reduce((acc, curr) => acc + curr.valorTotal, 0) * multiplicador;
+    const totalSaidas = notas.filter((n) => n.tipo === "SAIDA").reduce((acc, curr) => acc + curr.valorTotal, 0) * multiplicador;
     const saldo = totalEntradas - totalSaidas;
 
     let totalDedutivel = 0;
     notas.filter((n) => n.tipo === "SAIDA").forEach((nota) => {
       nota.itens.forEach((item) => { if (item.isDedutivel) totalDedutivel += item.valor; });
     });
-
-    totalDedutivel = Math.min(totalDedutivel, totalSaidas);
+    totalDedutivel = Math.min(totalDedutivel * multiplicador, totalSaidas);
+    
     const totalNaoDedutivel = Math.max(0, totalSaidas - totalDedutivel);
     const porcentagemDedutivel = totalSaidas > 0 ? Math.round((totalDedutivel / totalSaidas) * 100) : 0;
-
+    
     const lucro = Math.max(0, totalEntradas - totalDedutivel);
 
-    // Tabela Progressiva do IR (Mesma matemática do Simulador)
+    // Tabela Progressiva do IR
     const calcularImposto = (base: number) => {
       if (base <= 28467.20) return 0;
       if (base <= 33919.80) return (base * 0.075) - 2135.04;
@@ -173,7 +177,7 @@ export function VisaoGeral() {
     const aliquotaEfetiva = totalEntradas > 0 ? (impostoEstimado / totalEntradas) * 100 : 0;
 
     return { totalEntradas, totalSaidas, saldo, totalDedutivel, totalNaoDedutivel, porcentagemDedutivel, impostoEstimado, aliquotaEfetiva };
-  }, [notas]);
+  }, [notas, currentProperty]);
 
   const formatBRL = (valor: number) => new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(valor);
   const formatarData = (dataString: string) => {

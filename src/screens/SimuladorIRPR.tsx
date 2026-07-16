@@ -18,7 +18,7 @@ import { jsPDF } from "jspdf";
 import { toPng } from "html-to-image";
 
 export function SimuladorIRPR() {
-  const { currentProducer } = useProducer();
+  const { currentProducer, currentProperty } = useProducer();
   const baseUrl = import.meta.env.VITE_API_URL;
 
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
@@ -84,17 +84,16 @@ export function SimuladorIRPR() {
       const token = localStorage.getItem("@AgroPops:token");
       const response = await fetch(
         `${baseUrl}/livro-caixa/${currentProducer.id}/totais?ano=${selectedYear}`,
-        {
-          headers: { Authorization: `Bearer ${token}` },
-        },
+        { headers: { Authorization: `Bearer ${token}` } },
       );
-
       if (response.ok) {
         const totais = await response.json();
-        setReceitaBruta(totais.totalReceitas.toFixed(2).replace(".", ","));
-        setDespesasDedutiveis(
-          totais.totalDespesasDedutiveis.toFixed(2).replace(".", ","),
-        );
+        
+        // Aplica o Rateio (Exploração Conjunta)
+        const multiplicador = currentProperty ? (currentProperty.percentualParticipacao / 100) : 1;
+        
+        setReceitaBruta((totais.totalReceitas * multiplicador).toFixed(2).replace(".", ","));
+        setDespesasDedutiveis((totais.totalDespesasDedutiveis * multiplicador).toFixed(2).replace(".", ","));
       } else {
         setReceitaBruta("0,00");
         setDespesasDedutiveis("0,00");
@@ -104,7 +103,7 @@ export function SimuladorIRPR() {
     } finally {
       setIsLoading(false);
     }
-  }, [currentProducer, selectedYear, baseUrl]);
+  }, [currentProducer, currentProperty, selectedYear, baseUrl]);
 
   useEffect(() => {
     sincronizarDados();
@@ -381,13 +380,16 @@ export function SimuladorIRPR() {
         <div ref={colDadosRef} className="xl:col-span-4 space-y-4 p-2 -m-2">
           <div className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm relative overflow-hidden">
             <div className="flex items-center justify-between mb-4">
-              <div>
-                <h2 className="text-base font-bold text-gray-800 uppercase tracking-wider">
-                  Atividade Rural
-                </h2>
-                <p className="text-[10px] text-gray-400">
-                  Pode ser alterado manualmente para testes.
-                </p>
+             <div>
+                <div className="flex items-center gap-2">
+                  <h2 className="text-base font-bold text-gray-800 uppercase tracking-wider">Atividade Rural</h2>
+                  {currentProperty && (
+                    <span className="bg-amber-100 text-amber-800 text-[10px] font-bold px-2 py-0.5 rounded border border-amber-200">
+                      Cota: {currentProperty.percentualParticipacao}%
+                    </span>
+                  )}
+                </div>
+                <p className="text-[10px] text-gray-400 mt-0.5">Pode ser alterado manualmente para testes.</p>
               </div>
               <button
                 onClick={sincronizarDados}

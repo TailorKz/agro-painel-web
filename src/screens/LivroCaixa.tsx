@@ -52,7 +52,7 @@ const TIPOS_DOCUMENTO = [
 ];
 
 export function LivroCaixa() {
-  const { currentProducer } = useProducer();
+  const { currentProducer, currentProperty } = useProducer();
   const baseUrl = import.meta.env.VITE_API_URL;
 
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
@@ -148,24 +148,33 @@ export function LivroCaixa() {
       totalDedutivel: 0,
     }));
 
+    const multiplicador = currentProperty
+      ? currentProperty.percentualParticipacao / 100
+      : 1;
+
     lancamentos.forEach((lanc) => {
       const ano = parseInt(lanc.data.split("-")[0]);
       const mes = parseInt(lanc.data.split("-")[1]) - 1;
 
       if (ano === selectedYear) {
-        agrupado[mes].lancamentos.push(lanc);
+        // Multiplica o valor do lançamento pela Cota-Parte
+        const valorRateado = lanc.valor * multiplicador;
+
+        // Cria uma cópia do lançamento para a tela com o valor ajustado
+        agrupado[mes].lancamentos.push({ ...lanc, valor: valorRateado });
+
         if (lanc.tipo === "ENTRADA") {
-          agrupado[mes].totalEntradas += lanc.valor;
+          agrupado[mes].totalEntradas += valorRateado;
         } else {
-          agrupado[mes].totalSaidas += lanc.valor;
+          agrupado[mes].totalSaidas += valorRateado;
           if (lanc.isDedutivel) {
-            agrupado[mes].totalDedutivel += lanc.valor;
+            agrupado[mes].totalDedutivel += valorRateado;
           }
         }
       }
     });
     return agrupado;
-  }, [lancamentos, selectedYear]);
+  }, [lancamentos, selectedYear, currentProperty]);
 
   const handleSalvarAvulso = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -196,6 +205,7 @@ export function LivroCaixa() {
             valor: parseFloat(
               formData.valor.replace(/\./g, "").replace(",", "."),
             ),
+            propriedadeId: currentProperty ? currentProperty.id : null,
           }),
         },
       );
@@ -268,10 +278,17 @@ export function LivroCaixa() {
     <div className="space-y-6 pb-10">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-gray-800 flex items-center gap-2">
-            <FileSpreadsheet className="text-agro-secondary" />
-            Livro Caixa (LCDPR)
-          </h1>
+          <div className="flex items-center gap-3">
+            <h1 className="text-2xl font-bold text-gray-800 flex items-center gap-2">
+              <FileSpreadsheet className="text-agro-secondary" /> Livro Caixa
+              (LCDPR)
+            </h1>
+            {currentProperty && (
+              <span className="bg-amber-100 text-amber-800 text-[10px] font-bold px-2 py-0.5 rounded border border-amber-200 mt-1">
+                Exibindo Cota-Parte: {currentProperty.percentualParticipacao}%
+              </span>
+            )}
+          </div>
           <p className="text-sm text-gray-500 mt-1">
             Lançamentos detalhados do produtor organizados por ano-calendário.
           </p>
@@ -358,7 +375,7 @@ export function LivroCaixa() {
         </div>
       </div>
 
-      {/* TABELA PRINCIPAL TIPO EXCEL */}
+      {/* TABELA PRINCIPAL */}
       <div
         className={`bg-white border border-gray-300 shadow-sm rounded-xl overflow-hidden font-sans transition-opacity duration-300 ${isLoading ? "opacity-50 pointer-events-none" : "opacity-100"}`}
       >
@@ -564,7 +581,25 @@ export function LivroCaixa() {
                 <X size={20} />
               </button>
             </div>
-
+            <div className="bg-slate-50 border border-slate-200 p-3.5 mx-6 mt-6 rounded-xl flex items-start gap-3 shadow-sm">
+              <div className="text-slate-400 mt-0.5">
+                <Info size={18} />
+              </div>
+              <div>
+                <p className="text-sm text-slate-700 font-bold">
+                  Destino do Lançamento:
+                </p>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Produtor: <b>{currentProducer?.name}</b> <br />
+                  Imóvel:{" "}
+                  <b>
+                    {currentProperty
+                      ? currentProperty.nome
+                      : "Propriedade Padrão (Consolidado)"}
+                  </b>
+                </p>
+              </div>
+            </div>
             <form onSubmit={handleSalvarAvulso} className="p-6 space-y-4">
               {feedback.text && (
                 <div

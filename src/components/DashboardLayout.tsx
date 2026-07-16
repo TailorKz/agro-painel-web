@@ -16,7 +16,7 @@ import {
 } from "lucide-react";
 
 export function DashboardLayout() {
-  const { currentProducer, setCurrentProducer, producersList } = useProducer();
+  const { currentProducer, setCurrentProducer, producersList, currentProperty, setCurrentProperty } = useProducer();
   const navigate = useNavigate();
   const [userName, setUserName] = useState("Carregando...");
   const [userRole, setUserRole] = useState<"CONTADOR" | "PRODUTOR" | null>(null);
@@ -159,29 +159,68 @@ export function DashboardLayout() {
 
         <header className="h-20 bg-white border-b border-gray-100 flex items-center justify-between px-8 shadow-sm z-10 shrink-0">
           {userRole === "CONTADOR" ? (
-            <div className="relative group">
-              <label className="absolute -top-2 left-3 bg-white px-1 text-[10px] font-bold text-agro-secondary uppercase">
-                Visualizando Dados De:
-              </label>
-              <div className="flex items-center gap-2 border-2 border-gray-200 rounded-xl px-4 py-2.5 bg-gray-50/50 hover:border-agro-secondary cursor-pointer transition-colors min-w-[320px]">
-                <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                <select
-                  className="flex-1 bg-transparent text-sm font-bold text-gray-800 outline-none cursor-pointer appearance-none pr-6"
-                  value={currentProducer?.id || ""}
-                  onChange={(e) => {
-                    const selected = producersList.find((p) => p.id === e.target.value);
-                    setCurrentProducer(selected || null);
-                  }}
-                >
-                  <option value="" disabled>Selecione um produtor...</option>
-                  {producersList.map((producer) => (
-                    <option key={producer.id} value={producer.id}>
-                      {producer.name}
-                    </option>
-                  ))}
-                </select>
-                <ChevronDown size={16} className="text-gray-400 absolute right-4 pointer-events-none" />
+            <div className="flex items-center gap-4">
+              
+              {/* 1. SELETOR DE PRODUTOR */}
+              <div className="relative group">
+                <label className="absolute -top-2 left-3 bg-white px-1 text-[10px] font-bold text-agro-secondary uppercase">
+                  Visualizando Dados De:
+                </label>
+                <div className="flex items-center gap-2 border-2 border-gray-200 rounded-xl px-4 py-2.5 bg-gray-50/50 hover:border-agro-secondary cursor-pointer transition-colors min-w-[320px]">
+                  <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                  <select
+                    className="flex-1 bg-transparent text-sm font-bold text-gray-800 outline-none cursor-pointer appearance-none pr-6"
+                    value={currentProducer?.id || ""}
+                    onChange={(e) => {
+                      const selected = producersList.find((p) => p.id === e.target.value);
+                      setCurrentProducer(selected || null);
+                    }}
+                  >
+                    <option value="" disabled>Selecione um produtor...</option>
+                    {producersList.map((producer) => (
+                      <option key={producer.id} value={producer.id}>
+                        {producer.name}
+                      </option>
+                    ))}
+                  </select>
+                  <ChevronDown size={16} className="text-gray-400 absolute right-4 pointer-events-none" />
+                </div>
               </div>
+
+              {/* 2. SELETOR DE PROPRIEDADE (SÓ APARECE SE TIVER PROPRIEDADES) */}
+              {currentProducer && currentProducer.propriedades && currentProducer.propriedades.length > 0 && (
+                <div className="relative group hidden xl:block">
+                  <label className="absolute -top-2 left-3 bg-white px-1 text-[10px] font-bold text-blue-600 uppercase">
+                    Imóvel / Fazenda:
+                  </label>
+                  <div className="flex items-center gap-2 border-2 border-gray-200 rounded-xl px-4 py-2.5 bg-gray-50/50 hover:border-blue-400 cursor-pointer transition-colors min-w-[280px]">
+                    <div className={`w-2 h-2 rounded-full ${currentProperty ? 'bg-blue-500' : 'bg-emerald-500'}`} />
+                    <select
+                      className="flex-1 bg-transparent text-sm font-bold text-gray-800 outline-none cursor-pointer appearance-none pr-6"
+                      value={currentProperty?.id || ""}
+                      onChange={(e) => {
+                        if (e.target.value === "") {
+                          // Volta para a Visão Consolidada (Todas as fazendas juntas)
+                          setCurrentProperty(null); 
+                        } else {
+                          // Seleciona uma fazenda específica
+                          const selected = currentProducer.propriedades?.find(p => p.id.toString() === e.target.value);
+                          setCurrentProperty(selected || null);
+                        }
+                      }}
+                    >
+                      <option value="">Todas as Propriedades (Consolidado)</option>
+                      {currentProducer.propriedades.map((prop) => (
+                        <option key={prop.id} value={prop.id}>
+                          {prop.nome} ({prop.percentualParticipacao}%)
+                        </option>
+                      ))}
+                    </select>
+                    <ChevronDown size={16} className="text-gray-400 absolute right-4 pointer-events-none" />
+                  </div>
+                </div>
+              )}
+
             </div>
           ) : (
             <div className="flex items-center gap-3">

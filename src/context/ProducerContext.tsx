@@ -8,16 +8,27 @@ import React, {
 } from "react";
 import type { ReactNode } from "react";
 
+// --- NOVO TIPO: Propriedade Rural ---
+export type PropriedadeRural = {
+  id: number;
+  nome: string;
+  inscricaoEstadual: string;
+  caepf: string;
+  percentualParticipacao: number;
+};
+
 export type Producer = {
   id: string;
   nome: string;
   cpfCnpj: string;
   cnpj?: string;
+  telefone?: string;
   inscricaoEstadual: string;
   name?: string;
   document?: string;
   ie?: string;
   validadeCertificado?: string | null;
+  propriedades?: PropriedadeRural[]; // <-- Nova lista adicionada ao tipo
 };
 
 type RawProducer = {
@@ -25,48 +36,49 @@ type RawProducer = {
   nome: string;
   cpfCnpj: string;
   cnpj?: string;
+  telefone?: string;
   inscricaoEstadual: string;
   validadeCertificado?: string;
+  propriedades?: PropriedadeRural[];
 };
 
 type ProducerContextType = {
   currentProducer: Producer | null;
   setCurrentProducer: (producer: Producer | null) => void;
+  // --- NOVOS ESTADOS DA PROPRIEDADE ---
+  currentProperty: PropriedadeRural | null;
+  setCurrentProperty: (property: PropriedadeRural | null) => void;
+  // ------------------------------------
   producersList: Producer[];
   carregarProdutores: () => Promise<void>;
-  /** true enquanto o produtor/contador inicial ainda está sendo resolvido
-   *  (localStorage / 1ª chamada à API). As telas usam isso para saber que
-   *  ainda não há uma resposta definitiva — nem "carregado", nem "vazio". */
   isLoadingProducers: boolean;
 };
 
 const baseUrl = import.meta.env.VITE_API_URL;
-
 const ProducerContext = createContext<ProducerContextType | undefined>(
   undefined,
 );
 
 export function ProducerProvider({ children }: { children: ReactNode }) {
   const [currentProducer, setCurrentProducer] = useState<Producer | null>(null);
+  const [currentProperty, setCurrentProperty] =
+    useState<PropriedadeRural | null>(null); // null = Visão Consolidada
   const [producersList, setProducersList] = useState<Producer[]>([]);
-  // Começa em `true`: enquanto isso não virar `false`, ninguém sabe ainda se
-  // vai existir um produtor selecionado ou não. É o que permite às telas
-  // diferenciar "ainda não sei" de "sei que não tem nada" (ver VisaoGeral).
   const [isLoadingProducers, setIsLoadingProducers] = useState(true);
-  // Evita duas buscas simultâneas (ex.: o StrictMode do React chamando o
-  // efeito de montagem duas vezes em desenvolvimento), que faziam o objeto
-  // do produtor ser recriado duas vezes seguidas e disparar a animação de
-  // carregamento das telas duas vezes.
+
   const carregandoRef = useRef(false);
+
+  // Inteligência UX: Se o usuário trocar de produtor, reseta a fazenda para a Visão Consolidada
+  useEffect(() => {
+    setCurrentProperty(null);
+  }, [currentProducer?.id]);
 
   const carregarProdutores = useCallback(async () => {
     if (carregandoRef.current) return;
     carregandoRef.current = true;
     setIsLoadingProducers(true);
-
     try {
       const userRole = localStorage.getItem("@AgroPops:userRole");
-
       if (userRole === "PRODUTOR") {
         const produtorData = localStorage.getItem("@AgroPops:produtorData");
         if (produtorData) {
@@ -83,22 +95,17 @@ export function ProducerProvider({ children }: { children: ReactNode }) {
         }
         return;
       }
-
       const contadorData = localStorage.getItem("@AgroPops:contador");
       if (contadorData) {
         const contadorId = JSON.parse(contadorData).id;
-
         try {
           const token = localStorage.getItem("@AgroPops:token");
           const response = await fetch(
             `${baseUrl}/produtores/listar/${contadorId}`,
             {
-              headers: {
-                Authorization: `Bearer ${token}`,
-              },
+              headers: { Authorization: `Bearer ${token}` },
             },
           );
-
           if (response.ok) {
             const dadosReais = await response.json();
             const dadosFormatados = dadosReais.map((p: RawProducer) => ({
@@ -107,13 +114,8 @@ export function ProducerProvider({ children }: { children: ReactNode }) {
               name: p.nome,
               document: p.cpfCnpj,
               ie: p.inscricaoEstadual,
-              cnpj: p.cnpj
             }));
-
             setProducersList(dadosFormatados);
-
-            // Se o novo contador tem produtores, seleciona o primeiro.
-            // Se não tem, força o estado para NULL, limpando o lixo do contador anterior
             if (dadosFormatados.length > 0) {
               setCurrentProducer(dadosFormatados[0]);
             } else {
@@ -122,7 +124,7 @@ export function ProducerProvider({ children }: { children: ReactNode }) {
           } else if (response.status === 401 || response.status === 403) {
             localStorage.clear();
             alert(
-              "⏳ A sua sessão expirou por segurança. Por favor, faça login novamente.",
+              "Sua sessão expirou por segurança. Por favor, faça login novamente.",
             );
             window.location.href = "/login";
           }
@@ -134,7 +136,7 @@ export function ProducerProvider({ children }: { children: ReactNode }) {
       carregandoRef.current = false;
       setIsLoadingProducers(false);
     }
-  }, []);
+  }, [baseUrl]);
 
   useEffect(() => {
     carregarProdutores();
@@ -145,6 +147,8 @@ export function ProducerProvider({ children }: { children: ReactNode }) {
       value={{
         currentProducer,
         setCurrentProducer,
+        currentProperty,
+        setCurrentProperty,
         producersList,
         carregarProdutores,
         isLoadingProducers,
@@ -155,7 +159,6 @@ export function ProducerProvider({ children }: { children: ReactNode }) {
   );
 }
 
-// eslint-disable-next-line react-refresh/only-export-components
 export function useProducer() {
   const context = useContext(ProducerContext);
   if (!context)
