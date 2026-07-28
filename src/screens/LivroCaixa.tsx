@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useCallback } from "react";
+import React, { useState, useMemo, useEffect, useCallback } from "react";
 import {
   ChevronDown,
   ChevronRight,
@@ -13,6 +13,10 @@ import {
   RotateCcw,
   Calendar,
   Info,
+  FileText,
+  Edit3,
+  Save,
+  ArrowRightLeft,
 } from "lucide-react";
 import { useProducer } from "../context/ProducerContext";
 
@@ -21,10 +25,11 @@ type Lancamento = {
   data: string;
   documento: string;
   historico: string;
-  origem: "NFE" | "AVULSO";
+  origem: "NFE" | "AVULSO" | "SISTEMA";
   tipo: "ENTRADA" | "SAIDA";
   valor: number;
   isDedutivel: boolean;
+  notaId?: number;
 };
 
 const MESES = [
@@ -78,6 +83,38 @@ export function LivroCaixa() {
   });
   const [isSaving, setIsSaving] = useState(false);
   const [feedback, setFeedback] = useState({ text: "", type: "" });
+
+  // Estados para o Modal de Nota Fiscal
+  const [selectedNotaModal, setSelectedNotaModal] = useState<any | null>(null);
+
+  const [fornecedores, setFornecedores] = useState<any[]>([]);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+
+  useEffect(() => {
+    const fetchFornecedores = async () => {
+      const userRole = localStorage.getItem("@AgroPops:userRole");
+      if (userRole !== "CONTADOR") return; // Só busca se for contador
+
+      const contadorData = JSON.parse(
+        localStorage.getItem("@AgroPops:contador") || "{}",
+      );
+      if (!contadorData.id) return;
+
+      try {
+        const token = localStorage.getItem("@AgroPops:token");
+        const res = await fetch(
+          `${baseUrl}/fornecedores/listar/${contadorData.id}`,
+          {
+            headers: { Authorization: `Bearer ${token}` },
+          },
+        );
+        if (res.ok) setFornecedores(await res.json());
+      } catch (err) {
+        console.error(err);
+      }
+    };
+    fetchFornecedores();
+  }, [baseUrl]);
 
   const anosDisponiveis = useMemo(() => {
     const anoAtual = new Date().getFullYear();
@@ -176,6 +213,86 @@ export function LivroCaixa() {
     return agrupado;
   }, [lancamentos, selectedYear, currentProperty]);
 
+  const alternarDedutibilidadeDireto = async (
+    lancamento: Lancamento,
+    e: React.MouseEvent,
+  ) => {
+    e.stopPropagation(); // Impede de abrir a nota ao clicar no botão
+    if (lancamento.origem !== "NFE") return;
+    const idReal = lancamento.id.replace("NFE-", "");
+    setIsLoading(true);
+    try {
+      const token = localStorage.getItem("@AgroPops:token");
+      await fetch(`${baseUrl}/notas/item/${idReal}/toggle-dedutibilidade`, {
+        method: "PUT",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      buscarLancamentos(); // Atualiza a tela instantaneamente
+    } catch (error) {
+      console.error(error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const abrirNotaVinculada = async (notaId?: number) => {
+    if (!notaId) return;
+    setIsLoading(true);
+    try {
+      const token = localStorage.getItem("@AgroPops:token");
+      const res = await fetch(`${baseUrl}/notas/buscar/${notaId}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) setSelectedNotaModal(await res.json());
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Funções para dentro do Modal da Nota
+  const toggleItemDedutibilidade = (itemId: number) => {
+    if (selectedNotaModal) {
+      const updatedNota = {
+        ...selectedNotaModal,
+        itens: selectedNotaModal.itens.map((item: any) =>
+          item.id === itemId
+            ? { ...item, isDedutivel: !item.isDedutivel }
+            : item,
+        ),
+      };
+      setSelectedNotaModal(updatedNota);
+    }
+  };
+
+  const salvarAlteracoesItens = async () => {
+    if (!selectedNotaModal) return;
+    setIsLoading(true);
+    try {
+      const token = localStorage.getItem("@AgroPops:token");
+      const response = await fetch(
+        `${baseUrl}/notas/atualizar-itens/${selectedNotaModal.id}`,
+        {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify(selectedNotaModal.itens),
+        },
+      );
+      if (response.ok) {
+        setSelectedNotaModal(null);
+        buscarLancamentos(); // Reflete no livro caixa
+      }
+    } catch (error) {
+      console.error(error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const handleSalvarAvulso = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!currentProducer) return;
@@ -222,6 +339,7 @@ export function LivroCaixa() {
             tipo: "SAIDA",
             tipoDocumento: "3",
             documento: "",
+            nomeParticipante: "",
             cpfCnpjParticipante: "",
             historico: "",
             valor: "",
@@ -247,6 +365,18 @@ export function LivroCaixa() {
       setIsSaving(false);
     }
   };
+
+  // Filtra as sugestões em tempo real enquanto digita
+  const fornecedoresFiltrados = useMemo(() => {
+    if (!formData.nomeParticipante) return [];
+    return fornecedores.filter(
+      (f) =>
+        f.nome
+          .toLowerCase()
+          .includes(formData.nomeParticipante.toLowerCase()) ||
+        (f.cpfCnpj && f.cpfCnpj.includes(formData.nomeParticipante)),
+    );
+  }, [fornecedores, formData.nomeParticipante]);
 
   const handleExcluirAvulso = async (idFrontend: string) => {
     if (!window.confirm("Deseja realmente apagar este lançamento manual?"))
@@ -454,7 +584,8 @@ export function LivroCaixa() {
                           return (
                             <tr
                               key={lanc.id}
-                              className="border-b border-gray-200 hover:bg-yellow-50/50 [&_td]:border-r [&_td]:border-gray-200 [&_td]:px-3 [&_td]:py-1.5 text-gray-700"
+                              onClick={() => abrirNotaVinculada(lanc.notaId)}
+                              className={`border-b border-gray-200 [&_td]:border-r [&_td]:border-gray-200 [&_td]:px-3 [&_td]:py-1.5 text-gray-700 transition-colors ${lanc.origem === "NFE" ? "hover:bg-blue-50/50 cursor-pointer" : "hover:bg-yellow-50/50"}`}
                             >
                               <td className="font-mono text-xs">
                                 {formatDate(lanc.data)}
@@ -486,11 +617,23 @@ export function LivroCaixa() {
                               </td>
                               <td className="text-center">
                                 {lanc.tipo === "SAIDA" ? (
-                                  <span
-                                    className={`text-[10px] font-bold px-2 py-0.5 rounded ${lanc.isDedutivel ? "bg-emerald-100 text-emerald-700" : "bg-rose-100 text-rose-700"}`}
-                                  >
-                                    {lanc.isDedutivel ? "SIM" : "NÃO"}
-                                  </span>
+                                  lanc.origem === "NFE" ? (
+                                    <button
+                                      onClick={(e) =>
+                                        alternarDedutibilidadeDireto(lanc, e)
+                                      }
+                                      title="Clique para alternar o status deste item"
+                                      className={`text-[10px] font-bold px-2 py-0.5 rounded transition-transform hover:scale-105 active:scale-95 ${lanc.isDedutivel ? "bg-emerald-100 text-emerald-700 hover:bg-emerald-200" : "bg-rose-100 text-rose-700 hover:bg-rose-200"}`}
+                                    >
+                                      {lanc.isDedutivel ? "SIM" : "NÃO"}
+                                    </button>
+                                  ) : (
+                                    <span
+                                      className={`text-[10px] font-bold px-2 py-0.5 rounded ${lanc.isDedutivel ? "bg-emerald-100 text-emerald-700" : "bg-rose-100 text-rose-700"}`}
+                                    >
+                                      {lanc.isDedutivel ? "SIM" : "NÃO"}
+                                    </span>
+                                  )
                                 ) : (
                                   <span className="text-gray-400">-</span>
                                 )}
@@ -538,7 +681,10 @@ export function LivroCaixa() {
                               <td className="text-center">
                                 {lanc.origem === "AVULSO" ? (
                                   <button
-                                    onClick={() => handleExcluirAvulso(lanc.id)}
+                                    onClick={(e) => {
+                                      e.stopPropagation(); // <-- AQUI! Protegendo o clique na lixeira!
+                                      handleExcluirAvulso(lanc.id);
+                                    }}
                                     className="text-gray-400 hover:text-rose-600 p-1 transition-colors"
                                     title="Apagar Lançamento Manual"
                                   >
@@ -614,20 +760,33 @@ export function LivroCaixa() {
                 </div>
               )}
 
-              <div className="grid grid-cols-2 gap-2 bg-gray-100 p-1 rounded-xl">
+              <div className="flex items-center justify-between gap-2 bg-gray-50 p-1.5 rounded-xl border border-gray-200 shadow-inner">
                 <button
                   type="button"
                   onClick={() => setFormData((p) => ({ ...p, tipo: "SAIDA" }))}
-                  className={`py-2 text-xs font-bold rounded-lg transition-all ${formData.tipo === "SAIDA" ? "bg-rose-600 text-white shadow-sm" : "text-gray-500 hover:text-gray-700"}`}
+                  className={`flex-1 py-2.5 text-xs font-bold rounded-lg transition-all duration-300 ${
+                    formData.tipo === "SAIDA"
+                      ? "bg-rose-600 text-white shadow-md scale-[1.02]"
+                      : "bg-rose-100 text-rose-500 hover:bg-rose-200"
+                  }`}
                 >
                   DESPESA (Saída)
                 </button>
+
+                <div className="text-gray-300 shrink-0 px-1">
+                  <ArrowRightLeft size={16} />
+                </div>
+
                 <button
                   type="button"
                   onClick={() =>
                     setFormData((p) => ({ ...p, tipo: "ENTRADA" }))
                   }
-                  className={`py-2 text-xs font-bold rounded-lg transition-all ${formData.tipo === "ENTRADA" ? "bg-emerald-600 text-white shadow-sm" : "text-gray-500 hover:text-gray-700"}`}
+                  className={`flex-1 py-2.5 text-xs font-bold rounded-lg transition-all duration-300 ${
+                    formData.tipo === "ENTRADA"
+                      ? "bg-emerald-600 text-white shadow-md scale-[1.02]"
+                      : "bg-emerald-100 text-emerald-600 hover:bg-emerald-200"
+                  }`}
                 >
                   RECEITA (Entrada)
                 </button>
@@ -671,6 +830,64 @@ export function LivroCaixa() {
                 </div>
               </div>
 
+              <div className="grid grid-cols-1 gap-4 relative">
+                <div className="space-y-1 relative">
+                  <label className="text-xs font-bold text-gray-600 uppercase">
+                    Empresa / Favorecido (Pesquise ou Digite)
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="Ex: Agro Loja S/A"
+                    value={formData.nomeParticipante}
+                    onFocus={() => setShowSuggestions(true)}
+                    onBlur={() =>
+                      setTimeout(() => setShowSuggestions(false), 200)
+                    } // Delay para o clique funcionar
+                    onChange={(e) => {
+                      setFormData((p) => ({
+                        ...p,
+                        nomeParticipante: e.target.value,
+                      }));
+                      setShowSuggestions(true);
+                    }}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg outline-none text-sm focus:border-agro-secondary"
+                  />
+
+                  {/* CAIXA SUSPENSA DE AUTOCOMPLETE */}
+                  {showSuggestions && fornecedoresFiltrados.length > 0 && (
+                    <ul className="absolute z-50 left-0 right-0 top-16 bg-white border border-gray-200 rounded-xl shadow-xl max-h-48 overflow-y-auto divide-y divide-gray-100">
+                      {fornecedoresFiltrados.map((f) => (
+                        <li
+                          key={f.id}
+                          className="px-4 py-2.5 hover:bg-emerald-50 cursor-pointer flex justify-between items-center transition-colors"
+                          onClick={() => {
+                            setFormData((p) => ({
+                              ...p,
+                              nomeParticipante: f.nome,
+                              cpfCnpjParticipante:
+                                f.cpfCnpj || p.cpfCnpjParticipante,
+                              // Opcional: Já iniciar o histórico com o nome para facilitar
+                              historico: `Pgto para ${f.nome} - `,
+                            }));
+                            setShowSuggestions(false);
+                          }}
+                        >
+                          <span className="text-sm font-bold text-gray-800">
+                            {f.nome}
+                          </span>
+                          {f.cpfCnpj && (
+                            <span className="text-xs font-mono text-gray-400">
+                              {f.cpfCnpj}
+                            </span>
+                          )}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              </div>
+
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-1">
                   <label className="text-xs font-bold text-gray-600 uppercase">
@@ -689,11 +906,11 @@ export function LivroCaixa() {
                 </div>
                 <div className="space-y-1">
                   <label className="text-xs font-bold text-gray-600 uppercase">
-                    CPF / CNPJ
+                    CPF / CNPJ do Favorecido
                   </label>
                   <input
                     type="text"
-                    placeholder="Apenas números"
+                    placeholder="Apenas números (Opcional)"
                     value={formData.cpfCnpjParticipante}
                     onChange={(e) =>
                       setFormData((p) => ({
@@ -833,6 +1050,131 @@ export function LivroCaixa() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL PARA VISUALIZAR A NOTA CLICADA NO LIVRO CAIXA */}
+      {selectedNotaModal && (
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-5xl overflow-hidden flex flex-col max-h-[90vh]">
+            <div className="p-6 border-b border-gray-100 flex items-center justify-between bg-gray-50">
+              <div className="flex items-center gap-4">
+                <div>
+                  <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2">
+                    <FileText className="text-agro-secondary" /> Nota Fiscal Nº{" "}
+                    {selectedNotaModal.numero}
+                  </h2>
+                  <p className="text-sm text-gray-500 mt-1">
+                    {selectedNotaModal.empresaEnvolvida} •{" "}
+                    {formatDate(selectedNotaModal.dataEmissao)}
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setSelectedNotaModal(null)}
+                className="p-2 hover:bg-gray-200 rounded-lg text-gray-400"
+              >
+                <X size={20} />
+              </button>
+            </div>
+            <div className="p-6 overflow-y-auto bg-white">
+              <h3 className="text-sm font-bold text-gray-400 uppercase tracking-wider mb-4">
+                Itens da Operação ({selectedNotaModal.itens.length})
+              </h3>
+              <div className="border border-gray-100 rounded-xl overflow-hidden">
+                <table className="w-full text-left border-collapse">
+                  <thead>
+                    <tr className="bg-gray-50 border-b border-gray-100 text-xs text-gray-500 uppercase">
+                      <th className="px-4 py-3 font-medium">
+                        Produto / Descrição
+                      </th>
+                      <th className="px-4 py-3 font-medium">NCM</th>
+                      <th className="px-4 py-3 font-medium">
+                        Dedutibilidade (LCDPR)
+                      </th>
+                      <th className="px-4 py-3 font-medium text-right">
+                        Valor Unitário
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {selectedNotaModal.itens.map((item: any) => {
+                      // Proteção segura caso a API retorne alguma descrição nula
+                      const isDevolucao =
+                        item.descricao?.includes("[DEVOLUÇÃO]");
+                      const descricaoLimpa = item.descricao
+                        ? item.descricao.replace("[DEVOLUÇÃO]", "").trim()
+                        : "Produto sem descrição";
+                      const valorAbsoluto = Math.abs(item.valor);
+
+                      return (
+                        <tr key={item.id} className="hover:bg-gray-50/50">
+                          <td className="px-4 py-3 text-sm font-medium text-gray-800">
+                            {isDevolucao ? (
+                              <span
+                                className="text-sky-600 flex items-center gap-1.5 font-bold"
+                                title="Item de Devolução/Estorno"
+                              >
+                                <RotateCcw size={14} strokeWidth={3} />{" "}
+                                {descricaoLimpa}
+                              </span>
+                            ) : (
+                              descricaoLimpa
+                            )}
+                          </td>
+                          <td className="px-4 py-3 text-sm text-gray-500 font-mono">
+                            {item.ncm}
+                          </td>
+                          <td className="px-4 py-3">
+                            <button
+                              onClick={() => toggleItemDedutibilidade(item.id)}
+                              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all border ${item.isDedutivel ? "bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100" : "bg-rose-50 text-rose-700 border-rose-200 hover:bg-rose-100"}`}
+                            >
+                              <Edit3 size={12} />{" "}
+                              {item.isDedutivel
+                                ? "Despesa Dedutível"
+                                : "Uso Pessoal (Não Dedutível)"}
+                            </button>
+                          </td>
+                          <td className="px-4 py-3 text-sm font-bold text-gray-700 text-right">
+                            {isDevolucao ? (
+                              <span className="text-sky-600">
+                                - {formatBRL(valorAbsoluto)}
+                              </span>
+                            ) : (
+                              formatBRL(item.valor)
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+            <div className="p-6 border-t border-gray-100 bg-gray-50 flex justify-between items-center">
+              <div className="flex gap-3">
+                <button
+                  onClick={salvarAlteracoesItens}
+                  disabled={isLoading}
+                  className="flex items-center gap-2 px-6 py-2.5 bg-agro-secondary hover:bg-agro-primary text-white font-bold rounded-xl shadow-sm transition-all"
+                >
+                  {isLoading ? (
+                    <Loader2 size={18} className="animate-spin" />
+                  ) : (
+                    <Save size={18} />
+                  )}{" "}
+                  Salvar Alterações
+                </button>
+              </div>
+              <div className="text-right">
+                <p className="text-sm text-gray-500">Valor Total da Nota</p>
+                <p className="text-2xl font-bold text-gray-800">
+                  {formatBRL(selectedNotaModal.valorTotal)}
+                </p>
+              </div>
+            </div>
           </div>
         </div>
       )}
