@@ -17,6 +17,8 @@ import {
   Edit3,
   Save,
   ArrowRightLeft,
+  ListOrdered,
+  CalendarDays,
 } from "lucide-react";
 import { useProducer } from "../context/ProducerContext";
 
@@ -67,8 +69,6 @@ export function LivroCaixa() {
   const [isLoading, setIsLoading] = useState(false);
 
   const [isModalOpen, setIsModalOpen] = useState(false);
-
-  // Controle para exibir a caixa de ajuda de estornos
   const [showInfoEstorno, setShowInfoEstorno] = useState(false);
 
   const [formData, setFormData] = useState({
@@ -76,16 +76,21 @@ export function LivroCaixa() {
     tipo: "SAIDA",
     tipoDocumento: "3",
     documento: "",
+    nomeParticipante: "",
     cpfCnpjParticipante: "",
     historico: "",
     valor: "",
     isDedutivel: true,
   });
+
   const [isSaving, setIsSaving] = useState(false);
   const [feedback, setFeedback] = useState({ text: "", type: "" });
 
-  // Estados para o Modal de Nota Fiscal
+  // Estados do Modal da Nota Fiscal
   const [selectedNotaModal, setSelectedNotaModal] = useState<any | null>(null);
+  const [activeTabModal, setActiveTabModal] = useState<"itens" | "parcelas">(
+    "itens",
+  );
 
   const [fornecedores, setFornecedores] = useState<any[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
@@ -93,7 +98,7 @@ export function LivroCaixa() {
   useEffect(() => {
     const fetchFornecedores = async () => {
       const userRole = localStorage.getItem("@AgroPops:userRole");
-      if (userRole !== "CONTADOR") return; // Só busca se for contador
+      if (userRole !== "CONTADOR") return;
 
       const contadorData = JSON.parse(
         localStorage.getItem("@AgroPops:contador") || "{}",
@@ -160,8 +165,7 @@ export function LivroCaixa() {
         },
       );
       if (response.ok) {
-        const dados = await response.json();
-        setLancamentos(dados);
+        setLancamentos(await response.json());
       } else {
         setLancamentos([]);
       }
@@ -194,10 +198,7 @@ export function LivroCaixa() {
       const mes = parseInt(lanc.data.split("-")[1]) - 1;
 
       if (ano === selectedYear) {
-        // Multiplica o valor do lançamento pela Cota-Parte
         const valorRateado = lanc.valor * multiplicador;
-
-        // Cria uma cópia do lançamento para a tela com o valor ajustado
         agrupado[mes].lancamentos.push({ ...lanc, valor: valorRateado });
 
         if (lanc.tipo === "ENTRADA") {
@@ -217,7 +218,7 @@ export function LivroCaixa() {
     lancamento: Lancamento,
     e: React.MouseEvent,
   ) => {
-    e.stopPropagation(); // Impede de abrir a nota ao clicar no botão
+    e.stopPropagation();
     if (lancamento.origem !== "NFE") return;
     const idReal = lancamento.id.replace("NFE-", "");
     setIsLoading(true);
@@ -227,7 +228,7 @@ export function LivroCaixa() {
         method: "PUT",
         headers: { Authorization: `Bearer ${token}` },
       });
-      buscarLancamentos(); // Atualiza a tela instantaneamente
+      buscarLancamentos();
     } catch (error) {
       console.error(error);
     } finally {
@@ -243,7 +244,10 @@ export function LivroCaixa() {
       const res = await fetch(`${baseUrl}/notas/buscar/${notaId}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
-      if (res.ok) setSelectedNotaModal(await res.json());
+      if (res.ok) {
+        setSelectedNotaModal(await res.json());
+        setActiveTabModal("itens"); // Reseta para a aba de Itens sempre que abrir uma nova
+      }
     } catch (err) {
       console.error(err);
     } finally {
@@ -251,7 +255,6 @@ export function LivroCaixa() {
     }
   };
 
-  // Funções para dentro do Modal da Nota
   const toggleItemDedutibilidade = (itemId: number) => {
     if (selectedNotaModal) {
       const updatedNota = {
@@ -266,26 +269,40 @@ export function LivroCaixa() {
     }
   };
 
-  const salvarAlteracoesItens = async () => {
+  // Nova Função: Salva os itens e as parcelas simultaneamente
+  const salvarAlteracoesNota = async () => {
     if (!selectedNotaModal) return;
     setIsLoading(true);
     try {
       const token = localStorage.getItem("@AgroPops:token");
-      const response = await fetch(
-        `${baseUrl}/notas/atualizar-itens/${selectedNotaModal.id}`,
-        {
-          method: "PUT",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
-          },
-          body: JSON.stringify(selectedNotaModal.itens),
+
+      // 1. Envia as alterações dos itens (Dedutibilidade)
+      await fetch(`${baseUrl}/notas/atualizar-itens/${selectedNotaModal.id}`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
         },
-      );
-      if (response.ok) {
-        setSelectedNotaModal(null);
-        buscarLancamentos(); // Reflete no livro caixa
+        body: JSON.stringify(selectedNotaModal.itens),
+      });
+
+      // 2. Envia as alterações das parcelas (Datas de Vencimento)
+      if (selectedNotaModal.parcelas && selectedNotaModal.parcelas.length > 0) {
+        await fetch(
+          `${baseUrl}/notas/atualizar-parcelas/${selectedNotaModal.id}`,
+          {
+            method: "PUT",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${token}`,
+            },
+            body: JSON.stringify(selectedNotaModal.parcelas),
+          },
+        );
       }
+
+      setSelectedNotaModal(null);
+      buscarLancamentos(); // Reflete no livro caixa as novas datas e valores
     } catch (error) {
       console.error(error);
     } finally {
@@ -345,7 +362,7 @@ export function LivroCaixa() {
             valor: "",
             isDedutivel: true,
           });
-          setShowInfoEstorno(false); // reseta o modal ao fechar
+          setShowInfoEstorno(false);
           setFeedback({ text: "", type: "" });
           buscarLancamentos();
         }, 1500);
@@ -366,7 +383,6 @@ export function LivroCaixa() {
     }
   };
 
-  // Filtra as sugestões em tempo real enquanto digita
   const fornecedoresFiltrados = useMemo(() => {
     if (!formData.nomeParticipante) return [];
     return fornecedores.filter(
@@ -381,22 +397,16 @@ export function LivroCaixa() {
   const handleExcluirAvulso = async (idFrontend: string) => {
     if (!window.confirm("Deseja realmente apagar este lançamento manual?"))
       return;
-
     setIsLoading(true);
     try {
       const token = localStorage.getItem("@AgroPops:token");
       const idReal = idFrontend.replace("AVU-", "");
-
       const response = await fetch(`${baseUrl}/livro-caixa/avulso/${idReal}`, {
         method: "DELETE",
         headers: { Authorization: `Bearer ${token}` },
       });
-
-      if (response.ok) {
-        buscarLancamentos();
-      } else {
-        alert("Erro ao excluir o lançamento.");
-      }
+      if (response.ok) buscarLancamentos();
+      else alert("Erro ao excluir o lançamento.");
     } catch (error) {
       console.error(error);
     } finally {
@@ -420,7 +430,8 @@ export function LivroCaixa() {
             )}
           </div>
           <p className="text-sm text-gray-500 mt-1">
-            Lançamentos detalhados do produtor organizados por ano-calendário.
+            Lançamentos em Regime de Caixa agrupados por data de
+            pagamento/vencimento.
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -478,11 +489,7 @@ export function LivroCaixa() {
                           setSelectedYear(ano);
                           setShowYearDropdown(false);
                         }}
-                        className={`px-2 py-2 text-xs font-bold rounded-lg transition-colors ${
-                          selectedYear === ano
-                            ? "bg-agro-secondary text-white shadow-sm"
-                            : "text-gray-600 hover:bg-gray-100 border border-transparent hover:border-gray-200"
-                        }`}
+                        className={`px-2 py-2 text-xs font-bold rounded-lg transition-colors ${selectedYear === ano ? "bg-agro-secondary text-white shadow-sm" : "text-gray-600 hover:bg-gray-100 border border-transparent hover:border-gray-200"}`}
                       >
                         {ano}
                       </button>
@@ -492,7 +499,6 @@ export function LivroCaixa() {
               </>
             )}
           </div>
-
           <button className="flex items-center gap-2 bg-white text-gray-700 border border-gray-200 px-4 py-2.5 rounded-xl font-medium hover:bg-gray-50 transition-colors shadow-sm text-sm">
             <Download size={18} /> Apuração
           </button>
@@ -505,7 +511,6 @@ export function LivroCaixa() {
         </div>
       </div>
 
-      {/* TABELA PRINCIPAL */}
       <div
         className={`bg-white border border-gray-300 shadow-sm rounded-xl overflow-hidden font-sans transition-opacity duration-300 ${isLoading ? "opacity-50 pointer-events-none" : "opacity-100"}`}
       >
@@ -580,7 +585,6 @@ export function LivroCaixa() {
                         {mesDados.lancamentos.map((lanc) => {
                           const isDevolucao = lanc.valor < 0;
                           const valorAbsoluto = Math.abs(lanc.valor);
-
                           return (
                             <tr
                               key={lanc.id}
@@ -604,13 +608,7 @@ export function LivroCaixa() {
                               </td>
                               <td className="text-center">
                                 <span
-                                  className={`text-[10px] font-bold px-2 py-0.5 rounded tracking-wide ${
-                                    lanc.origem === "NFE"
-                                      ? "bg-blue-100 text-blue-700"
-                                      : lanc.origem === "SISTEMA"
-                                        ? "bg-amber-100 text-amber-700 border border-amber-200"
-                                        : "bg-purple-100 text-purple-700"
-                                  }`}
+                                  className={`text-[10px] font-bold px-2 py-0.5 rounded tracking-wide ${lanc.origem === "NFE" ? "bg-blue-100 text-blue-700" : lanc.origem === "SISTEMA" ? "bg-amber-100 text-amber-700 border border-amber-200" : "bg-purple-100 text-purple-700"}`}
                                 >
                                   {lanc.origem}
                                 </span>
@@ -622,10 +620,12 @@ export function LivroCaixa() {
                                       onClick={(e) =>
                                         alternarDedutibilidadeDireto(lanc, e)
                                       }
-                                      title="Clique para alternar o status deste item"
+                                      title="Clique para alternar o status da nota inteira"
                                       className={`text-[10px] font-bold px-2 py-0.5 rounded transition-transform hover:scale-105 active:scale-95 ${lanc.isDedutivel ? "bg-emerald-100 text-emerald-700 hover:bg-emerald-200" : "bg-rose-100 text-rose-700 hover:bg-rose-200"}`}
                                     >
-                                      {lanc.isDedutivel ? "SIM" : "NÃO"}
+                                      {lanc.isDedutivel
+                                        ? "SIM (Alterar)"
+                                        : "NÃO (Alterar)"}
                                     </button>
                                   ) : (
                                     <span
@@ -638,7 +638,6 @@ export function LivroCaixa() {
                                   <span className="text-gray-400">-</span>
                                 )}
                               </td>
-
                               <td className="text-right font-mono">
                                 {lanc.tipo === "ENTRADA" ? (
                                   isDevolucao ? (
@@ -677,12 +676,11 @@ export function LivroCaixa() {
                                   ""
                                 )}
                               </td>
-
                               <td className="text-center">
                                 {lanc.origem === "AVULSO" ? (
                                   <button
                                     onClick={(e) => {
-                                      e.stopPropagation(); // <-- AQUI! Protegendo o clique na lixeira!
+                                      e.stopPropagation();
                                       handleExcluirAvulso(lanc.id);
                                     }}
                                     className="text-gray-400 hover:text-rose-600 p-1 transition-colors"
@@ -712,7 +710,6 @@ export function LivroCaixa() {
         </div>
       </div>
 
-      {/* MODAL DE CADASTRO AVULSO */}
       {isModalOpen && (
         <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg overflow-hidden flex flex-col">
@@ -759,39 +756,27 @@ export function LivroCaixa() {
                   {feedback.text}
                 </div>
               )}
-
               <div className="flex items-center justify-between gap-2 bg-gray-50 p-1.5 rounded-xl border border-gray-200 shadow-inner">
                 <button
                   type="button"
                   onClick={() => setFormData((p) => ({ ...p, tipo: "SAIDA" }))}
-                  className={`flex-1 py-2.5 text-xs font-bold rounded-lg transition-all duration-300 ${
-                    formData.tipo === "SAIDA"
-                      ? "bg-rose-600 text-white shadow-md scale-[1.02]"
-                      : "bg-rose-100 text-rose-500 hover:bg-rose-200"
-                  }`}
+                  className={`flex-1 py-2.5 text-xs font-bold rounded-lg transition-all duration-300 ${formData.tipo === "SAIDA" ? "bg-rose-600 text-white shadow-md scale-[1.02]" : "bg-rose-100 text-rose-500 hover:bg-rose-200"}`}
                 >
                   DESPESA (Saída)
                 </button>
-
                 <div className="text-gray-300 shrink-0 px-1">
                   <ArrowRightLeft size={16} />
                 </div>
-
                 <button
                   type="button"
                   onClick={() =>
                     setFormData((p) => ({ ...p, tipo: "ENTRADA" }))
                   }
-                  className={`flex-1 py-2.5 text-xs font-bold rounded-lg transition-all duration-300 ${
-                    formData.tipo === "ENTRADA"
-                      ? "bg-emerald-600 text-white shadow-md scale-[1.02]"
-                      : "bg-emerald-100 text-emerald-600 hover:bg-emerald-200"
-                  }`}
+                  className={`flex-1 py-2.5 text-xs font-bold rounded-lg transition-all duration-300 ${formData.tipo === "ENTRADA" ? "bg-emerald-600 text-white shadow-md scale-[1.02]" : "bg-emerald-100 text-emerald-600 hover:bg-emerald-200"}`}
                 >
                   RECEITA (Entrada)
                 </button>
               </div>
-
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-1">
                   <label className="text-xs font-bold text-gray-600 uppercase">
@@ -829,7 +814,6 @@ export function LivroCaixa() {
                   </select>
                 </div>
               </div>
-
               <div className="grid grid-cols-1 gap-4 relative">
                 <div className="space-y-1 relative">
                   <label className="text-xs font-bold text-gray-600 uppercase">
@@ -843,7 +827,7 @@ export function LivroCaixa() {
                     onFocus={() => setShowSuggestions(true)}
                     onBlur={() =>
                       setTimeout(() => setShowSuggestions(false), 200)
-                    } // Delay para o clique funcionar
+                    }
                     onChange={(e) => {
                       setFormData((p) => ({
                         ...p,
@@ -853,8 +837,6 @@ export function LivroCaixa() {
                     }}
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg outline-none text-sm focus:border-agro-secondary"
                   />
-
-                  {/* CAIXA SUSPENSA DE AUTOCOMPLETE */}
                   {showSuggestions && fornecedoresFiltrados.length > 0 && (
                     <ul className="absolute z-50 left-0 right-0 top-16 bg-white border border-gray-200 rounded-xl shadow-xl max-h-48 overflow-y-auto divide-y divide-gray-100">
                       {fornecedoresFiltrados.map((f) => (
@@ -867,7 +849,6 @@ export function LivroCaixa() {
                               nomeParticipante: f.nome,
                               cpfCnpjParticipante:
                                 f.cpfCnpj || p.cpfCnpjParticipante,
-                              // Opcional: Já iniciar o histórico com o nome para facilitar
                               historico: `Pgto para ${f.nome} - `,
                             }));
                             setShowSuggestions(false);
@@ -887,7 +868,6 @@ export function LivroCaixa() {
                   )}
                 </div>
               </div>
-
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-1">
                   <label className="text-xs font-bold text-gray-600 uppercase">
@@ -922,7 +902,6 @@ export function LivroCaixa() {
                   />
                 </div>
               </div>
-
               <div className="space-y-1">
                 <label className="text-xs font-bold text-gray-600 uppercase">
                   Histórico do Lançamento
@@ -938,8 +917,6 @@ export function LivroCaixa() {
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg outline-none text-sm focus:border-agro-secondary"
                 />
               </div>
-
-              {/* BLOCO FINANCEIRO ATUALIZADO COM O BOTÃO DE INFO */}
               <div className="grid grid-cols-2 gap-4 items-start pt-2">
                 <div className="space-y-1">
                   <label className="text-xs font-bold text-gray-600 uppercase">
@@ -972,7 +949,6 @@ export function LivroCaixa() {
                     </button>
                   </div>
                 </div>
-
                 {formData.tipo === "SAIDA" ? (
                   <div className="pt-6">
                     <label className="flex items-center gap-2 cursor-pointer select-none">
@@ -1002,8 +978,6 @@ export function LivroCaixa() {
                     * Receitas entram 100% no bruto.
                   </div>
                 )}
-
-                {/* CAIXA DE EXPLICAÇÃO EXPANSÍVEL (OCUPA AS DUAS COLUNAS DO GRID) */}
                 {showInfoEstorno && (
                   <div className="col-span-2 p-3 mt-1 bg-sky-50 border border-sky-100 rounded-lg text-xs text-sky-800 leading-relaxed shadow-inner">
                     <p className="mb-2">
@@ -1027,7 +1001,6 @@ export function LivroCaixa() {
                   </div>
                 )}
               </div>
-
               <div className="pt-4 border-t border-gray-100 flex justify-end gap-3 bg-gray-50 -mx-6 -mb-6 p-4">
                 <button
                   type="button"
@@ -1054,7 +1027,7 @@ export function LivroCaixa() {
         </div>
       )}
 
-      {/* MODAL PARA VISUALIZAR A NOTA CLICADA NO LIVRO CAIXA */}
+      {/* NOVO MODAL COM ABAS: ITENS E PARCELAS */}
       {selectedNotaModal && (
         <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-5xl overflow-hidden flex flex-col max-h-[90vh]">
@@ -1066,7 +1039,7 @@ export function LivroCaixa() {
                     {selectedNotaModal.numero}
                   </h2>
                   <p className="text-sm text-gray-500 mt-1">
-                    {selectedNotaModal.empresaEnvolvida} •{" "}
+                    {selectedNotaModal.empresaEnvolvida} • Emissão:{" "}
                     {formatDate(selectedNotaModal.dataEmissao)}
                   </p>
                 </div>
@@ -1078,85 +1051,199 @@ export function LivroCaixa() {
                 <X size={20} />
               </button>
             </div>
-            <div className="p-6 overflow-y-auto bg-white">
-              <h3 className="text-sm font-bold text-gray-400 uppercase tracking-wider mb-4">
-                Itens da Operação ({selectedNotaModal.itens.length})
-              </h3>
-              <div className="border border-gray-100 rounded-xl overflow-hidden">
-                <table className="w-full text-left border-collapse">
-                  <thead>
-                    <tr className="bg-gray-50 border-b border-gray-100 text-xs text-gray-500 uppercase">
-                      <th className="px-4 py-3 font-medium">
-                        Produto / Descrição
-                      </th>
-                      <th className="px-4 py-3 font-medium">NCM</th>
-                      <th className="px-4 py-3 font-medium">
-                        Dedutibilidade (LCDPR)
-                      </th>
-                      <th className="px-4 py-3 font-medium text-right">
-                        Valor Unitário
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-100">
-                    {selectedNotaModal.itens.map((item: any) => {
-                      // Proteção segura caso a API retorne alguma descrição nula
-                      const isDevolucao =
-                        item.descricao?.includes("[DEVOLUÇÃO]");
-                      const descricaoLimpa = item.descricao
-                        ? item.descricao.replace("[DEVOLUÇÃO]", "").trim()
-                        : "Produto sem descrição";
-                      const valorAbsoluto = Math.abs(item.valor);
 
-                      return (
-                        <tr key={item.id} className="hover:bg-gray-50/50">
-                          <td className="px-4 py-3 text-sm font-medium text-gray-800">
-                            {isDevolucao ? (
-                              <span
-                                className="text-sky-600 flex items-center gap-1.5 font-bold"
-                                title="Item de Devolução/Estorno"
-                              >
-                                <RotateCcw size={14} strokeWidth={3} />{" "}
-                                {descricaoLimpa}
-                              </span>
-                            ) : (
-                              descricaoLimpa
-                            )}
-                          </td>
-                          <td className="px-4 py-3 text-sm text-gray-500 font-mono">
-                            {item.ncm}
-                          </td>
-                          <td className="px-4 py-3">
-                            <button
-                              onClick={() => toggleItemDedutibilidade(item.id)}
-                              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all border ${item.isDedutivel ? "bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100" : "bg-rose-50 text-rose-700 border-rose-200 hover:bg-rose-100"}`}
-                            >
-                              <Edit3 size={12} />{" "}
-                              {item.isDedutivel
-                                ? "Despesa Dedutível"
-                                : "Uso Pessoal (Não Dedutível)"}
-                            </button>
-                          </td>
-                          <td className="px-4 py-3 text-sm font-bold text-gray-700 text-right">
-                            {isDevolucao ? (
-                              <span className="text-sky-600">
-                                - {formatBRL(valorAbsoluto)}
-                              </span>
-                            ) : (
-                              formatBRL(item.valor)
-                            )}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
+            {/* ABAS DO MODAL */}
+            <div className="flex px-6 bg-gray-50 border-b border-gray-100">
+              <button
+                onClick={() => setActiveTabModal("itens")}
+                className={`flex items-center gap-2 pb-3 px-4 text-sm font-bold border-b-2 transition-colors ${
+                  activeTabModal === "itens"
+                    ? "border-agro-secondary text-agro-secondary"
+                    : "border-transparent text-gray-500 hover:text-gray-700"
+                }`}
+              >
+                <ListOrdered size={16} /> Itens e Dedutibilidade
+              </button>
+              <button
+                onClick={() => setActiveTabModal("parcelas")}
+                className={`flex items-center gap-2 pb-3 px-4 text-sm font-bold border-b-2 transition-colors ${
+                  activeTabModal === "parcelas"
+                    ? "border-blue-500 text-blue-600"
+                    : "border-transparent text-gray-500 hover:text-gray-700"
+                }`}
+              >
+                <CalendarDays size={16} /> Financeiro (Parcelas)
+              </button>
             </div>
+
+            <div className="p-6 overflow-y-auto bg-white">
+              {activeTabModal === "itens" ? (
+                <>
+                  <h3 className="text-sm font-bold text-gray-400 uppercase tracking-wider mb-4">
+                    Itens da Operação ({selectedNotaModal.itens.length})
+                  </h3>
+                  <div className="border border-gray-100 rounded-xl overflow-hidden">
+                    <table className="w-full text-left border-collapse">
+                      <thead>
+                        <tr className="bg-gray-50 border-b border-gray-100 text-xs text-gray-500 uppercase">
+                          <th className="px-4 py-3 font-medium">
+                            Produto / Descrição
+                          </th>
+                          <th className="px-4 py-3 font-medium">NCM</th>
+                          <th className="px-4 py-3 font-medium text-center">
+                            Dedutibilidade (LCDPR)
+                          </th>
+                          <th className="px-4 py-3 font-medium text-right">
+                            Valor Unitário
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100">
+                        {selectedNotaModal.itens.map((item: any) => {
+                          const isDevolucao =
+                            item.descricao?.includes("[DEVOLUÇÃO]");
+                          const descricaoLimpa = item.descricao
+                            ? item.descricao.replace("[DEVOLUÇÃO]", "").trim()
+                            : "Produto sem descrição";
+                          const valorAbsoluto = Math.abs(item.valor);
+
+                          return (
+                            <tr key={item.id} className="hover:bg-gray-50/50">
+                              <td className="px-4 py-3 text-sm font-medium text-gray-800">
+                                {isDevolucao ? (
+                                  <span
+                                    className="text-sky-600 flex items-center gap-1.5 font-bold"
+                                    title="Item de Devolução/Estorno"
+                                  >
+                                    <RotateCcw size={14} strokeWidth={3} />{" "}
+                                    {descricaoLimpa}
+                                  </span>
+                                ) : (
+                                  descricaoLimpa
+                                )}
+                              </td>
+                              <td className="px-4 py-3 text-sm text-gray-500 font-mono">
+                                {item.ncm}
+                              </td>
+                              <td className="px-4 py-3 text-center">
+                                <button
+                                  onClick={() =>
+                                    toggleItemDedutibilidade(item.id)
+                                  }
+                                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all border ${item.isDedutivel ? "bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100" : "bg-rose-50 text-rose-700 border-rose-200 hover:bg-rose-100"}`}
+                                >
+                                  <Edit3 size={12} />{" "}
+                                  {item.isDedutivel
+                                    ? "Despesa Dedutível"
+                                    : "Uso Pessoal (Não Dedutível)"}
+                                </button>
+                              </td>
+                              <td className="px-4 py-3 text-sm font-bold text-gray-700 text-right font-mono">
+                                {isDevolucao ? (
+                                  <span className="text-sky-600">
+                                    - {formatBRL(valorAbsoluto)}
+                                  </span>
+                                ) : (
+                                  formatBRL(item.valor)
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="text-sm font-bold text-gray-400 uppercase tracking-wider">
+                      Agenda de Pagamentos / Recebimentos
+                    </h3>
+                    <span className="text-xs bg-blue-50 text-blue-700 font-bold px-3 py-1 rounded-full border border-blue-200">
+                      O Livro Caixa obedece a estas datas
+                    </span>
+                  </div>
+                  <div className="border border-gray-100 rounded-xl overflow-hidden">
+                    <table className="w-full text-left border-collapse">
+                      <thead>
+                        <tr className="bg-gray-50 border-b border-gray-100 text-xs text-gray-500 uppercase">
+                          <th className="px-4 py-3 font-medium">
+                            Nº da Parcela
+                          </th>
+                          <th className="px-4 py-3 font-medium">
+                            Data de Vencimento
+                          </th>
+                          <th className="px-4 py-3 font-medium text-right">
+                            Valor da Parcela
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100">
+                        {!selectedNotaModal.parcelas ||
+                        selectedNotaModal.parcelas.length === 0 ? (
+                          <tr>
+                            <td
+                              colSpan={3}
+                              className="p-8 text-center text-gray-400 text-sm"
+                            >
+                              Nenhuma parcela localizada. O valor total foi
+                              lançado à vista.
+                            </td>
+                          </tr>
+                        ) : (
+                          selectedNotaModal.parcelas.map((parcela: any) => (
+                            <tr
+                              key={parcela.id}
+                              className="hover:bg-blue-50/20 transition-colors"
+                            >
+                              <td className="px-4 py-3 text-sm font-bold text-gray-700 font-mono">
+                                Parcela {parcela.numeroParcela}
+                              </td>
+                              <td className="px-4 py-3">
+                                <input
+                                  type="date"
+                                  value={parcela.dataVencimento}
+                                  onChange={(e) => {
+                                    const novaData = e.target.value;
+                                    setSelectedNotaModal((prev: any) => ({
+                                      ...prev,
+                                      parcelas: prev.parcelas.map((p: any) =>
+                                        p.id === parcela.id
+                                          ? { ...p, dataVencimento: novaData }
+                                          : p,
+                                      ),
+                                    }));
+                                  }}
+                                  className="px-3 py-1.5 border border-gray-300 rounded-lg outline-none text-sm font-bold focus:border-blue-400 text-blue-800 bg-blue-50/50 transition-colors"
+                                  title="Altere a data para mudar o mês de impacto no Livro Caixa"
+                                />
+                              </td>
+                              <td className="px-4 py-3 text-sm font-bold text-gray-800 text-right font-mono">
+                                {formatBRL(parcela.valor)}
+                              </td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                  <p className="text-xs text-gray-400 mt-4 leading-relaxed bg-gray-50 p-3 rounded-lg border border-gray-100">
+                    <Info size={14} className="inline mr-1" />
+                    <strong>Dica de Ouro:</strong> O Produtor renegociou o
+                    pagamento para o mês da colheita? Altere a data de
+                    vencimento acima e clique em "Salvar Alterações". A linha no
+                    Livro Caixa pulará automaticamente para o mês correto,
+                    protegendo o caixa do produtor da malha fina.
+                  </p>
+                </>
+              )}
+            </div>
+
             <div className="p-6 border-t border-gray-100 bg-gray-50 flex justify-between items-center">
               <div className="flex gap-3">
                 <button
-                  onClick={salvarAlteracoesItens}
+                  onClick={salvarAlteracoesNota}
                   disabled={isLoading}
                   className="flex items-center gap-2 px-6 py-2.5 bg-agro-secondary hover:bg-agro-primary text-white font-bold rounded-xl shadow-sm transition-all"
                 >
@@ -1164,7 +1251,7 @@ export function LivroCaixa() {
                     <Loader2 size={18} className="animate-spin" />
                   ) : (
                     <Save size={18} />
-                  )}{" "}
+                  )}
                   Salvar Alterações
                 </button>
               </div>

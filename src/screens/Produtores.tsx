@@ -12,14 +12,14 @@ import {
   ChevronLeft,
   Building2,
   Edit2,
-  Trash2,
+  UserMinus,
 } from "lucide-react";
 import { useProducer } from "../context/ProducerContext";
 
 type PropriedadeForm = {
   id: number;
   nome: string;
-  cpfCnpj: string; // <-- Novo campo
+  cpfCnpj: string;
   inscricaoEstadual: string;
   caepf: string;
   percentualParticipacao: number | string;
@@ -109,6 +109,9 @@ export function Produtores() {
   const [currentStep, setCurrentStep] = useState(1);
   const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
 
+  // NOVO ESTADO: Controle de Edição
+  const [editingId, setEditingId] = useState<string | null>(null);
+
   // Estados do Formulário - Etapa 1
   const [nome, setNome] = useState("");
   const [cpfCnpj, setCpfCnpj] = useState("");
@@ -116,7 +119,7 @@ export function Produtores() {
   const [telefone, setTelefone] = useState("");
   const [endereco, setEndereco] = useState("");
 
-  // Estados do Formulário - Etapa 2 (Lista Dinâmica)
+  // Estados do Formulário - Etapa 2
   const [propriedades, setPropriedades] = useState<PropriedadeForm[]>([
     {
       id: Date.now(),
@@ -135,15 +138,28 @@ export function Produtores() {
   const [isLoading, setIsLoading] = useState(false);
   const [message, setMessage] = useState({ text: "", type: "" });
 
-  // A Busca Funcional Corrigida (lendo .name e .document vindos do Contexto)
-  const produtoresFiltrados = producersList.filter(
-    (p) =>
-      p.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      p.document?.includes(searchTerm.replace(/\D/g, "")),
-  );
+  // A BUSCA FUNCIONAL E CORRIGIDA EM TEMPO REAL
+  const produtoresFiltrados = producersList.filter((p) => {
+    if (!searchTerm) return true; // Se o campo estiver vazio, mostra todos
+
+    const searchLower = searchTerm.toLowerCase();
+    const searchDigits = searchTerm.replace(/\D/g, ""); // Extrai só números da pesquisa
+
+    // Tratamos tanto "nome" quanto "name" porque depende de como vem da API/Contexto
+    const nomeString = (p.nome || p.name || "").toLowerCase();
+    const docString = (p.cpfCnpj || p.document || "").replace(/\D/g, "");
+
+    const matchesName = nomeString.includes(searchLower);
+    // Se a pessoa digitou apenas letras, o searchDigits fica vazio. Então não comparamos documento.
+    const matchesDoc =
+      searchDigits !== "" ? docString.includes(searchDigits) : false;
+
+    return matchesName || matchesDoc;
+  });
 
   const handleCloseModal = () => {
     setIsModalOpen(false);
+    setEditingId(null);
     setCurrentStep(1);
     setNome("");
     setCpfCnpj("");
@@ -163,6 +179,72 @@ export function Produtores() {
     setSenhaCertificado("");
     setCertificado(null);
     setMessage({ text: "", type: "" });
+  };
+
+  // --- NOVA FUNÇÃO: POPULAR O FORMULÁRIO COM OS DADOS PARA EDIÇÃO ---
+  const handleEditar = (producer: any) => {
+    setEditingId(producer.id);
+    setNome(producer.nome || producer.name || "");
+    setCpfCnpj(maskCpfCnpj(producer.cpfCnpj || producer.document || ""));
+    setCnpj(producer.cnpj ? maskCpfCnpj(producer.cnpj) : "");
+    setTelefone(producer.telefone ? maskPhone(producer.telefone) : "");
+    setEndereco(producer.endereco || "");
+
+    // Puxa os empreendimentos do banco de dados
+    if (producer.propriedades && producer.propriedades.length > 0) {
+      setPropriedades(
+        producer.propriedades.map((p: any) => ({
+          id: p.id || Date.now() + Math.random(),
+          nome: p.nome,
+          cpfCnpj: p.cpfCnpj ? maskCpfCnpj(p.cpfCnpj) : "",
+          inscricaoEstadual: p.inscricaoEstadual || "",
+          caepf: p.caepf || "",
+          percentualParticipacao: p.percentualParticipacao,
+        })),
+      );
+    } else {
+      setPropriedades([
+        {
+          id: Date.now(),
+          nome: "Empreendimento Principal",
+          cpfCnpj: "",
+          inscricaoEstadual: "",
+          caepf: "",
+          percentualParticipacao: 100,
+        },
+      ]);
+    }
+
+    setCurrentStep(1);
+    setIsModalOpen(true);
+    setMenuOpenId(null);
+  };
+
+  // --- NOVA FUNÇÃO: DESVINCULAR DA CARTEIRA ---
+  const handleDesvincular = async (id: string) => {
+    if (
+      !window.confirm(
+        "Atenção: Deseja remover este produtor da sua carteira?\n\nEle não será apagado do sistema, apenas se tornará Independente.",
+      )
+    )
+      return;
+
+    try {
+      const token = localStorage.getItem("@AgroPops:token");
+      const response = await fetch(`${baseUrl}/produtores/desvincular/${id}`, {
+        method: "PUT",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      if (response.ok) {
+        carregarProdutores();
+        setMenuOpenId(null);
+      } else {
+        alert("Erro ao remover da carteira.");
+      }
+    } catch (err) {
+      console.error(err);
+    }
   };
 
   const adicionarPropriedade = () => {
@@ -237,6 +319,10 @@ export function Produtores() {
     const contadorId = JSON.parse(contadorData).id;
 
     const formData = new FormData();
+
+    // Se for modo edição, envia o ID
+    if (editingId) formData.append("id", editingId);
+
     formData.append("nome", nome);
     formData.append("cpfCnpj", cpfCnpj.replace(/\D/g, ""));
     if (cnpj) formData.append("cnpj", cnpj.replace(/\D/g, ""));
@@ -269,7 +355,9 @@ export function Produtores() {
 
       if (response.ok) {
         setMessage({
-          text: "Produtor cadastrado com sucesso!",
+          text: editingId
+            ? "Dados atualizados com sucesso!"
+            : "Produtor cadastrado com sucesso!",
           type: "success",
         });
         setTimeout(() => {
@@ -319,7 +407,7 @@ export function Produtores() {
             type="text"
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            placeholder="Buscar produtor por nome ou documento..."
+            placeholder="Buscar produtor por nome ou documento (em tempo real)..."
             className="w-full pl-10 pr-4 py-2 bg-gray-50 border border-gray-200 rounded-lg outline-none focus:border-agro-light transition-all text-sm"
           />
         </div>
@@ -340,18 +428,18 @@ export function Produtores() {
             {produtoresFiltrados.length === 0 ? (
               <tr>
                 <td colSpan={5} className="p-8 text-center text-gray-400">
-                  Nenhum produtor localizado.
+                  Nenhum produtor localizado para a pesquisa.
                 </td>
               </tr>
             ) : (
-              produtoresFiltrados.map((producer) => (
+              produtoresFiltrados.map((producer: any) => (
                 <tr
                   key={producer.id}
                   className="hover:bg-gray-50/50 transition-colors"
                 >
                   <td className="px-6 py-4">
                     <p className="font-semibold text-gray-800">
-                      {producer.name}
+                      {producer.nome || producer.name}
                     </p>
                     {producer.telefone && (
                       <p className="text-xs text-gray-500 mt-0.5">
@@ -361,7 +449,7 @@ export function Produtores() {
                   </td>
                   <td className="px-6 py-4">
                     <p className="text-sm text-gray-600 font-mono">
-                      {maskCpfCnpj(producer.document || "")}
+                      {maskCpfCnpj(producer.cpfCnpj || producer.document || "")}
                     </p>
                     {producer.cnpj && (
                       <p className="text-xs text-gray-400 font-mono mt-0.5">
@@ -392,7 +480,6 @@ export function Produtores() {
                     )}
                   </td>
                   <td className="px-6 py-4 text-right relative">
-                    {/* MENU 3 PONTINHOS FUNCIONAL */}
                     <button
                       onClick={() =>
                         setMenuOpenId(
@@ -404,13 +491,19 @@ export function Produtores() {
                       <MoreVertical size={18} />
                     </button>
                     {menuOpenId === producer.id && (
-                      <div className="absolute right-6 mt-2 w-40 bg-white border border-gray-100 rounded-xl shadow-lg z-50 overflow-hidden flex flex-col text-left">
-                        <button className="px-4 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50 flex items-center gap-2 transition-colors">
+                      <div className="absolute right-6 mt-2 w-48 bg-white border border-gray-100 rounded-xl shadow-lg z-50 overflow-hidden flex flex-col text-left">
+                        <button
+                          onClick={() => handleEditar(producer)}
+                          className="px-4 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50 flex items-center gap-2 transition-colors"
+                        >
                           <Edit2 size={16} /> Editar Dados
                         </button>
                         <div className="h-px bg-gray-100 w-full" />
-                        <button className="px-4 py-2.5 text-sm font-medium text-rose-600 hover:bg-rose-50 flex items-center gap-2 transition-colors">
-                          <Trash2 size={16} /> Excluir
+                        <button
+                          onClick={() => handleDesvincular(producer.id)}
+                          className="px-4 py-2.5 text-sm font-medium text-rose-600 hover:bg-rose-50 flex items-center gap-2 transition-colors"
+                        >
+                          <UserMinus size={16} /> Remover da Carteira
                         </button>
                       </div>
                     )}
@@ -428,7 +521,7 @@ export function Produtores() {
             <div className="p-6 border-b border-gray-100 flex items-center justify-between bg-gray-50">
               <div>
                 <h2 className="text-xl font-bold text-gray-800">
-                  Novo Produtor Rural
+                  {editingId ? "Editar Produtor" : "Novo Produtor Rural"}
                 </h2>
                 <div className="flex items-center gap-2 mt-2">
                   {[1, 2, 3].map((step) => (
@@ -543,7 +636,6 @@ export function Produtores() {
                 </div>
               )}
 
-              {/* ETAPA 2 COM LAYOUT DIVIDIDO EM 2 LINHAS PARA RESPIRAR OS CAMPOS */}
               {currentStep === 2 && (
                 <div className="space-y-4 animate-in fade-in slide-in-from-right-4 duration-300">
                   <div className="flex flex-col sm:flex-row items-center gap-4 p-5 bg-blue-50 border border-blue-100 rounded-xl">
@@ -578,7 +670,6 @@ export function Produtores() {
                           </button>
                         )}
 
-                        {/* Linha 1 do Empreendimento */}
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                           <div className="space-y-1">
                             <label className="text-xs font-bold text-gray-500 uppercase">
@@ -617,7 +708,6 @@ export function Produtores() {
                           </div>
                         </div>
 
-                        {/* Linha 2 do Empreendimento */}
                         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                           <div className="space-y-1">
                             <label className="text-xs font-bold text-gray-500 uppercase">
@@ -723,7 +813,7 @@ export function Produtores() {
                       </p>
                       {!certificado && (
                         <p className="text-xs text-gray-500 mt-1">
-                          Pode ser inserido posteriormente no painel.
+                          Pode ser atualizado posteriormente.
                         </p>
                       )}
                     </div>
@@ -774,7 +864,11 @@ export function Produtores() {
                   disabled={isLoading}
                   className="px-6 py-2.5 text-sm font-bold text-white bg-agro-secondary hover:bg-agro-primary rounded-xl transition-colors shadow-sm disabled:opacity-50 flex items-center gap-2"
                 >
-                  {isLoading ? "Salvando..." : "Finalizar Cadastro"}{" "}
+                  {isLoading
+                    ? "Salvando..."
+                    : editingId
+                      ? "Atualizar Cadastro"
+                      : "Finalizar Cadastro"}{" "}
                   <CheckCircle size={16} />
                 </button>
               )}
