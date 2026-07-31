@@ -22,29 +22,7 @@ import {
   HelpCircle,
 } from "lucide-react";
 import { useProducer } from "../context/ProducerContext";
-
-// ==========================================
-// MÍNI-DICIONÁRIO NCM (Você pode expandir isso depois)
-// ==========================================
-const NCM_CAPITULOS: Record<string, string> = {
-  "01": "Animais Vivos",
-  "10": "Cereais",
-  "12": "Sementes e frutos oleaginosos; grãos, sementes e frutos industriais ou medicinais",
-  "31": "Adubos ou Fertilizantes",
-  "38": "Produtos diversos das indústrias químicas",
-  "84": "Reatores nucleares, caldeiras, máquinas, aparelhos e instrumentos mecânicos",
-  "87": "Veículos automóveis, tratores, ciclos e outros veículos terrestres",
-};
-const NCM_POSICOES: Record<string, string> = {
-  "1005": "Milho",
-  "1201": "Soja, mesmo triturada",
-  "3105": "Adubos minerais ou químicos (Nitrogênio, Fósforo e Potássio)",
-  "3808":
-    "Inseticidas, rodenticidas, fungicidas, herbicidas, inibidores de germinação",
-  "8433": "Máquinas e aparelhos para colheita ou debulha de produtos agrícolas",
-  "8701": "Tratores (exceto os carros-tratores da posição 87.09)",
-};
-// ==========================================
+import { NCM_CAPITULOS, NCM_POSICOES } from "../utils/dicionarioNcm";
 
 type Lancamento = {
   id: string;
@@ -260,7 +238,8 @@ export function LivroCaixa() {
     }
   };
 
-  const abrirNotaVinculada = async (notaId?: number) => {
+  // Alterada para aceitar "preserveTab", útil para quando recarregamos a nota pelo botão Restaurar
+  const abrirNotaVinculada = async (notaId?: number, preserveTab = false) => {
     if (!notaId) return;
     setIsLoading(true);
     try {
@@ -270,7 +249,7 @@ export function LivroCaixa() {
       });
       if (res.ok) {
         setSelectedNotaModal(await res.json());
-        setActiveTabModal("itens");
+        if (!preserveTab) setActiveTabModal("itens");
       }
     } catch (err) {
       console.error(err);
@@ -1143,7 +1122,12 @@ export function LivroCaixa() {
                           <th className="px-4 py-3 font-medium">
                             Produto / Descrição
                           </th>
-                          <th className="px-4 py-3 font-medium">NCM / CFOP</th>
+                          <th className="px-4 py-3 font-medium text-center">
+                            CFOP
+                          </th>
+                          <th className="px-4 py-3 font-medium text-center">
+                            NCM
+                          </th>
                           <th className="px-4 py-3 font-medium text-center">
                             Dedutibilidade (LCDPR)
                           </th>
@@ -1186,38 +1170,42 @@ export function LivroCaixa() {
                                   descricaoLimpa
                                 )}
                               </td>
-                              <td className="px-4 py-3">
-                                <div className="flex flex-col gap-1">
-                                  {item.cfop && (
-                                    <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-100 px-1.5 py-0.5 rounded w-fit">
-                                      CFOP {item.cfop}
-                                    </span>
-                                  )}
-                                  <div className="flex items-center gap-1.5 text-sm font-mono text-gray-500">
-                                    NCM: {item.ncm}
-                                    <div className="group relative inline-block">
-                                      <HelpCircle
-                                        size={14}
-                                        className="text-blue-400 cursor-pointer hover:text-blue-600"
-                                      />
-                                      <div className="hidden group-hover:block absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-72 bg-gray-900 text-white text-xs p-3 rounded-lg shadow-xl z-50 font-sans normal-case text-left">
-                                        <div className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-3 h-3 bg-gray-900 rotate-45" />
-                                        <p className="font-black text-emerald-400 mb-1 border-b border-gray-700 pb-1">
-                                          Análise do NCM
-                                        </p>
-                                        <p className="font-bold text-gray-300 mt-1">
-                                          Capítulo {cap}:
-                                        </p>
-                                        <p className="mb-2 leading-tight">
-                                          {descCap}
-                                        </p>
-                                        <p className="font-bold text-blue-300">
-                                          Posição {pos}:
-                                        </p>
-                                        <p className="leading-tight">
-                                          {descPos}
-                                        </p>
-                                      </div>
+                              {/* CFOP SEPARADO E COM BADGE VISUAL */}
+                              <td className="px-4 py-3 text-center">
+                                {item.cfop ? (
+                                  <span className="text-[11px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-100 px-2 py-0.5 rounded shadow-sm">
+                                    {item.cfop}
+                                  </span>
+                                ) : (
+                                  <span className="text-gray-400 font-mono text-sm">
+                                    -
+                                  </span>
+                                )}
+                              </td>
+                              {/* NCM SEPARADO E COM TOOLTIP INTELIGENTE */}
+                              <td className="px-4 py-3 text-center">
+                                <div className="flex items-center justify-center gap-1.5 text-sm font-mono text-gray-500">
+                                  {item.ncm}
+                                  <div className="group relative inline-block">
+                                    <HelpCircle
+                                      size={14}
+                                      className="text-blue-400 cursor-pointer hover:text-blue-600"
+                                    />
+                                    <div className="hidden group-hover:block absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-72 bg-gray-900 text-white text-xs p-3 rounded-lg shadow-xl z-50 font-sans normal-case text-left">
+                                      <div className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-3 h-3 bg-gray-900 rotate-45" />
+                                      <p className="font-black text-emerald-400 mb-1 border-b border-gray-700 pb-1">
+                                        Análise do NCM
+                                      </p>
+                                      <p className="font-bold text-gray-300 mt-1">
+                                        Capítulo {cap}:
+                                      </p>
+                                      <p className="mb-2 leading-tight">
+                                        {descCap}
+                                      </p>
+                                      <p className="font-bold text-blue-300">
+                                        Posição {pos}:
+                                      </p>
+                                      <p className="leading-tight">{descPos}</p>
                                     </div>
                                   </div>
                                 </div>
@@ -1263,12 +1251,24 @@ export function LivroCaixa() {
                         valores.
                       </p>
                     </div>
-                    <button
-                      onClick={handleAdicionarParcela}
-                      className="flex items-center gap-2 bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100 px-4 py-2 rounded-xl text-sm font-bold transition-colors"
-                    >
-                      <Plus size={16} /> Adicionar Parcela Manual
-                    </button>
+                    {/* BOTÕES DE RESET E ADICIONAR PARCELA */}
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() =>
+                          abrirNotaVinculada(selectedNotaModal.id, true)
+                        }
+                        className="flex items-center gap-2 bg-gray-100 text-gray-600 border border-gray-200 hover:bg-gray-200 px-3 py-2 rounded-xl text-sm font-bold transition-colors"
+                        title="Desfazer alterações e voltar ao estado original da nota"
+                      >
+                        <RotateCcw size={16} /> Restaurar Original
+                      </button>
+                      <button
+                        onClick={handleAdicionarParcela}
+                        className="flex items-center gap-2 bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100 px-4 py-2 rounded-xl text-sm font-bold transition-colors"
+                      >
+                        <Plus size={16} /> Adicionar Parcela Manual
+                      </button>
+                    </div>
                   </div>
 
                   <div className="border border-gray-100 rounded-xl overflow-hidden">
@@ -1279,7 +1279,9 @@ export function LivroCaixa() {
                           <th className="px-4 py-3 font-medium">
                             Data de Vencimento / Pagto
                           </th>
-                          <th className="px-4 py-3 font-medium">Valor (R$)</th>
+                          <th className="px-4 py-3 font-medium text-right">
+                            Valor da Parcela
+                          </th>
                           <th className="px-4 py-3 font-medium text-center">
                             Ação
                           </th>
@@ -1334,21 +1336,29 @@ export function LivroCaixa() {
                                     className="px-3 py-1.5 border border-gray-300 rounded-lg outline-none text-sm font-bold focus:border-blue-400 text-blue-800 bg-blue-50/50 transition-colors"
                                   />
                                 </td>
-                                <td className="px-4 py-3">
+                                {/* MÁSCARA FINANCEIRA INTELIGENTE DO VALOR DA PARCELA */}
+                                <td className="px-4 py-3 text-right">
                                   <input
-                                    type="number"
-                                    step="0.01"
-                                    value={parcela.valor}
+                                    type="text"
+                                    value={Number(
+                                      parcela.valor || 0,
+                                    ).toLocaleString("pt-BR", {
+                                      minimumFractionDigits: 2,
+                                      maximumFractionDigits: 2,
+                                    })}
                                     onChange={(e) => {
-                                      const newVal =
-                                        parseFloat(e.target.value) || 0;
+                                      const raw = e.target.value.replace(
+                                        /\D/g,
+                                        "",
+                                      );
+                                      const newVal = parseFloat(raw) / 100 || 0;
                                       setSelectedNotaModal((prev: any) => {
                                         const p = [...prev.parcelas];
                                         p[index].valor = newVal;
                                         return { ...prev, parcelas: p };
                                       });
                                     }}
-                                    className="w-32 px-3 py-1.5 border border-gray-300 rounded-lg outline-none text-sm font-mono font-bold text-gray-800 text-right focus:border-blue-400"
+                                    className="w-36 px-3 py-1.5 border border-gray-300 rounded-lg outline-none text-sm font-mono font-bold text-gray-800 text-right focus:border-blue-400 bg-white shadow-sm"
                                   />
                                 </td>
                                 <td className="px-4 py-3 text-center">
