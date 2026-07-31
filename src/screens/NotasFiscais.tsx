@@ -16,7 +16,7 @@ import {
   RotateCcw,
   CalendarDays,
   ChevronDown,
-  Info
+  Info,
 } from "lucide-react";
 import { useProducer } from "../context/ProducerContext";
 
@@ -205,8 +205,10 @@ export function NotasFiscais() {
     setUploadMessage({ text: "Preparando envio em lotes...", type: "success" });
 
     const token = localStorage.getItem("@AgroPops:token");
-    let sucesso = 0;
-    let falha = 0;
+    let totalImportadas = 0;
+    let totalIgnoradas = 0;
+    let totalFalhas = 0;
+
     const tamanhoLote = 20;
 
     for (let i = 0; i < selectedFiles.length; i += tamanhoLote) {
@@ -227,31 +229,57 @@ export function NotasFiscais() {
             body: formData,
           },
         );
+
         if (response.ok) {
-          sucesso += lote.length;
+          // LÊ O TEXTO QUE O JAVA ENVIOU
+          const msgBackend = await response.text();
+
+          // Extrai os números da mensagem do Java para somar os lotes
+          const matchImportadas = msgBackend.match(/(\d+)\snotas\simportadas/);
+          const matchIgnoradas = msgBackend.match(/(\d+)\signoradas/);
+          const matchFalhas = msgBackend.match(/(\d+)\sfalharam/);
+
+          if (matchImportadas) totalImportadas += parseInt(matchImportadas[1]);
+          if (matchIgnoradas) totalIgnoradas += parseInt(matchIgnoradas[1]);
+          if (matchFalhas) totalFalhas += parseInt(matchFalhas[1]);
         } else {
-          falha += lote.length;
+          totalFalhas += lote.length;
         }
       } catch (error) {
-        falha += lote.length;
+        totalFalhas += lote.length;
       }
 
       const loteAtual = Math.ceil((i + 1) / tamanhoLote);
       const totalLotes = Math.ceil(selectedFiles.length / tamanhoLote);
       setUploadMessage({
-        text: `Processando lote ${loteAtual} de ${totalLotes}... (${sucesso} salvas)`,
+        text: `Processando lote ${loteAtual} de ${totalLotes}...`,
         type: "success",
       });
     }
+
+    // Constrói o relatório final baseado na leitura do Java
+    let msgFinal = `Concluído: ${totalImportadas} notas importadas.`;
+    if (totalIgnoradas > 0)
+      msgFinal += ` ${totalIgnoradas} ignoradas (já existiam).`;
+    if (totalFalhas > 0) msgFinal += ` ${totalFalhas} falharam (inválido).`;
+
     setUploadMessage({
-      text: `Concluído! ${sucesso} processadas.`,
-      type: sucesso > 0 ? "success" : "error",
+      text: msgFinal,
+      type:
+        totalImportadas > 0
+          ? "success"
+          : totalIgnoradas > 0
+            ? "success"
+            : "error",
     });
+
+    // Tempo ajustado para 3.5 segundos
     setTimeout(() => {
       setIsImportModalOpen(false);
       setSelectedFiles([]);
       buscarNotas();
-    }, 1000);
+    }, 3500);
+
     setIsUploading(false);
   };
 

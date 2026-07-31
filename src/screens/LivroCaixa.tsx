@@ -19,8 +19,32 @@ import {
   ArrowRightLeft,
   ListOrdered,
   CalendarDays,
+  HelpCircle,
 } from "lucide-react";
 import { useProducer } from "../context/ProducerContext";
+
+// ==========================================
+// MÍNI-DICIONÁRIO NCM (Você pode expandir isso depois)
+// ==========================================
+const NCM_CAPITULOS: Record<string, string> = {
+  "01": "Animais Vivos",
+  "10": "Cereais",
+  "12": "Sementes e frutos oleaginosos; grãos, sementes e frutos industriais ou medicinais",
+  "31": "Adubos ou Fertilizantes",
+  "38": "Produtos diversos das indústrias químicas",
+  "84": "Reatores nucleares, caldeiras, máquinas, aparelhos e instrumentos mecânicos",
+  "87": "Veículos automóveis, tratores, ciclos e outros veículos terrestres",
+};
+const NCM_POSICOES: Record<string, string> = {
+  "1005": "Milho",
+  "1201": "Soja, mesmo triturada",
+  "3105": "Adubos minerais ou químicos (Nitrogênio, Fósforo e Potássio)",
+  "3808":
+    "Inseticidas, rodenticidas, fungicidas, herbicidas, inibidores de germinação",
+  "8433": "Máquinas e aparelhos para colheita ou debulha de produtos agrícolas",
+  "8701": "Tratores (exceto os carros-tratores da posição 87.09)",
+};
+// ==========================================
 
 type Lancamento = {
   id: string;
@@ -246,7 +270,7 @@ export function LivroCaixa() {
       });
       if (res.ok) {
         setSelectedNotaModal(await res.json());
-        setActiveTabModal("itens"); // Reseta para a aba de Itens sempre que abrir uma nova
+        setActiveTabModal("itens");
       }
     } catch (err) {
       console.error(err);
@@ -269,14 +293,55 @@ export function LivroCaixa() {
     }
   };
 
-  // Nova Função: Salva os itens e as parcelas simultaneamente
+  // --- FUNÇÕES DE MANIPULAÇÃO MANUAL DE PARCELAS ---
+  const handleAdicionarParcela = () => {
+    if (!selectedNotaModal) return;
+    const novaParcela = {
+      id: null, // Sem ID para o backend identificar como nova
+      numeroParcela: String(selectedNotaModal.parcelas.length + 1).padStart(
+        3,
+        "0",
+      ),
+      dataVencimento: selectedNotaModal.dataEmissao,
+      valor: 0,
+    };
+    setSelectedNotaModal({
+      ...selectedNotaModal,
+      parcelas: [...selectedNotaModal.parcelas, novaParcela],
+    });
+  };
+
+  const handleRemoverParcela = (index: number) => {
+    if (!selectedNotaModal) return;
+    const novasParcelas = [...selectedNotaModal.parcelas];
+    novasParcelas.splice(index, 1);
+    // Reorganiza a numeração
+    novasParcelas.forEach(
+      (p, i) => (p.numeroParcela = String(i + 1).padStart(3, "0")),
+    );
+    setSelectedNotaModal({ ...selectedNotaModal, parcelas: novasParcelas });
+  };
+
   const salvarAlteracoesNota = async () => {
     if (!selectedNotaModal) return;
+
+    // Validação Fiscal: A soma das parcelas deve bater com o total da nota
+    const somaParcelas = selectedNotaModal.parcelas.reduce(
+      (acc: number, p: any) => acc + Number(p.valor),
+      0,
+    );
+    // Margem de erro de 10 centavos por arredondamento
+    if (Math.abs(somaParcelas - selectedNotaModal.valorTotal) > 0.1) {
+      alert(
+        `Atenção: A soma das parcelas (${formatBRL(somaParcelas)}) não confere com o total da nota (${formatBRL(selectedNotaModal.valorTotal)}). Ajuste os valores antes de salvar.`,
+      );
+      return;
+    }
+
     setIsLoading(true);
     try {
       const token = localStorage.getItem("@AgroPops:token");
 
-      // 1. Envia as alterações dos itens (Dedutibilidade)
       await fetch(`${baseUrl}/notas/atualizar-itens/${selectedNotaModal.id}`, {
         method: "PUT",
         headers: {
@@ -286,7 +351,6 @@ export function LivroCaixa() {
         body: JSON.stringify(selectedNotaModal.itens),
       });
 
-      // 2. Envia as alterações das parcelas (Datas de Vencimento)
       if (selectedNotaModal.parcelas && selectedNotaModal.parcelas.length > 0) {
         await fetch(
           `${baseUrl}/notas/atualizar-parcelas/${selectedNotaModal.id}`,
@@ -302,7 +366,7 @@ export function LivroCaixa() {
       }
 
       setSelectedNotaModal(null);
-      buscarLancamentos(); // Reflete no livro caixa as novas datas e valores
+      buscarLancamentos();
     } catch (error) {
       console.error(error);
     } finally {
@@ -441,11 +505,7 @@ export function LivroCaixa() {
                 key={ano}
                 onClick={() => setSelectedYear(ano)}
                 disabled={isLoading}
-                className={`px-4 py-2 text-sm font-bold rounded-lg transition-all ${
-                  selectedYear === ano
-                    ? "bg-agro-secondary text-white shadow-sm"
-                    : "text-gray-500 hover:bg-gray-100"
-                } disabled:opacity-50`}
+                className={`px-4 py-2 text-sm font-bold rounded-lg transition-all ${selectedYear === ano ? "bg-agro-secondary text-white shadow-sm" : "text-gray-500 hover:bg-gray-100"} disabled:opacity-50`}
               >
                 {ano}
               </button>
@@ -454,11 +514,7 @@ export function LivroCaixa() {
             <button
               onClick={() => setShowYearDropdown(!showYearDropdown)}
               disabled={isLoading}
-              className={`p-2 rounded-lg transition-colors flex items-center gap-1 ${
-                showYearDropdown
-                  ? "bg-gray-100 text-gray-800"
-                  : "text-gray-500 hover:bg-gray-100 hover:text-gray-800"
-              }`}
+              className={`p-2 rounded-lg transition-colors flex items-center gap-1 ${showYearDropdown ? "bg-gray-100 text-gray-800" : "text-gray-500 hover:bg-gray-100 hover:text-gray-800"}`}
               title="Explorar mais anos"
             >
               {isLoading ? (
@@ -1027,10 +1083,9 @@ export function LivroCaixa() {
         </div>
       )}
 
-      {/* NOVO MODAL COM ABAS: ITENS E PARCELAS */}
       {selectedNotaModal && (
         <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-5xl overflow-hidden flex flex-col max-h-[90vh]">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-6xl overflow-hidden flex flex-col max-h-[90vh]">
             <div className="p-6 border-b border-gray-100 flex items-center justify-between bg-gray-50">
               <div className="flex items-center gap-4">
                 <div>
@@ -1052,44 +1107,43 @@ export function LivroCaixa() {
               </button>
             </div>
 
-            {/* ABAS DO MODAL */}
-            <div className="flex px-6 bg-gray-50 border-b border-gray-100">
+            <div className="flex px-6 bg-gray-50 border-b border-gray-100 pt-2">
               <button
                 onClick={() => setActiveTabModal("itens")}
-                className={`flex items-center gap-2 pb-3 px-4 text-sm font-bold border-b-2 transition-colors ${
+                className={`flex items-center gap-2 pb-3 px-5 text-sm font-bold border-b-2 transition-colors ${
                   activeTabModal === "itens"
-                    ? "border-agro-secondary text-agro-secondary"
+                    ? "border-agro-secondary text-agro-secondary bg-white rounded-t-xl shadow-[0_-4px_6px_-4px_rgba(0,0,0,0.05)]"
                     : "border-transparent text-gray-500 hover:text-gray-700"
                 }`}
               >
-                <ListOrdered size={16} /> Itens e Dedutibilidade
+                <ListOrdered size={16} /> Produtos e Dedutibilidade
               </button>
               <button
                 onClick={() => setActiveTabModal("parcelas")}
-                className={`flex items-center gap-2 pb-3 px-4 text-sm font-bold border-b-2 transition-colors ${
+                className={`flex items-center gap-2 pb-3 px-5 text-sm font-bold border-b-2 transition-colors ${
                   activeTabModal === "parcelas"
-                    ? "border-blue-500 text-blue-600"
+                    ? "border-blue-500 text-blue-600 bg-white rounded-t-xl shadow-[0_-4px_6px_-4px_rgba(0,0,0,0.05)]"
                     : "border-transparent text-gray-500 hover:text-gray-700"
                 }`}
               >
-                <CalendarDays size={16} /> Financeiro (Parcelas)
+                <CalendarDays size={16} /> Financeiro e Parcelamento
               </button>
             </div>
 
-            <div className="p-6 overflow-y-auto bg-white">
+            <div className="p-6 overflow-y-auto bg-white flex-1">
               {activeTabModal === "itens" ? (
                 <>
                   <h3 className="text-sm font-bold text-gray-400 uppercase tracking-wider mb-4">
-                    Itens da Operação ({selectedNotaModal.itens.length})
+                    Itens NFE ({selectedNotaModal.itens.length})
                   </h3>
-                  <div className="border border-gray-100 rounded-xl overflow-hidden">
+                  <div className="border border-gray-100 rounded-xl overflow-visible">
                     <table className="w-full text-left border-collapse">
                       <thead>
                         <tr className="bg-gray-50 border-b border-gray-100 text-xs text-gray-500 uppercase">
                           <th className="px-4 py-3 font-medium">
                             Produto / Descrição
                           </th>
-                          <th className="px-4 py-3 font-medium">NCM</th>
+                          <th className="px-4 py-3 font-medium">NCM / CFOP</th>
                           <th className="px-4 py-3 font-medium text-center">
                             Dedutibilidade (LCDPR)
                           </th>
@@ -1105,25 +1159,68 @@ export function LivroCaixa() {
                           const descricaoLimpa = item.descricao
                             ? item.descricao.replace("[DEVOLUÇÃO]", "").trim()
                             : "Produto sem descrição";
-                          const valorAbsoluto = Math.abs(item.valor);
+
+                          const cap = item.ncm
+                            ? item.ncm.substring(0, 2)
+                            : "00";
+                          const pos = item.ncm
+                            ? item.ncm.substring(0, 4)
+                            : "0000";
+                          const descCap =
+                            NCM_CAPITULOS[cap] || "Capítulo não mapeado";
+                          const descPos =
+                            NCM_POSICOES[pos] || "Posição não mapeada";
 
                           return (
                             <tr key={item.id} className="hover:bg-gray-50/50">
                               <td className="px-4 py-3 text-sm font-medium text-gray-800">
                                 {isDevolucao ? (
-                                  <span
-                                    className="text-sky-600 flex items-center gap-1.5 font-bold"
-                                    title="Item de Devolução/Estorno"
-                                  >
-                                    <RotateCcw size={14} strokeWidth={3} />{" "}
+                                  <span className="text-sky-600 font-bold">
+                                    <RotateCcw
+                                      size={14}
+                                      className="inline mr-1"
+                                    />
                                     {descricaoLimpa}
                                   </span>
                                 ) : (
                                   descricaoLimpa
                                 )}
                               </td>
-                              <td className="px-4 py-3 text-sm text-gray-500 font-mono">
-                                {item.ncm}
+                              <td className="px-4 py-3">
+                                <div className="flex flex-col gap-1">
+                                  {item.cfop && (
+                                    <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-100 px-1.5 py-0.5 rounded w-fit">
+                                      CFOP {item.cfop}
+                                    </span>
+                                  )}
+                                  <div className="flex items-center gap-1.5 text-sm font-mono text-gray-500">
+                                    NCM: {item.ncm}
+                                    <div className="group relative inline-block">
+                                      <HelpCircle
+                                        size={14}
+                                        className="text-blue-400 cursor-pointer hover:text-blue-600"
+                                      />
+                                      <div className="hidden group-hover:block absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-72 bg-gray-900 text-white text-xs p-3 rounded-lg shadow-xl z-50 font-sans normal-case text-left">
+                                        <div className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-3 h-3 bg-gray-900 rotate-45" />
+                                        <p className="font-black text-emerald-400 mb-1 border-b border-gray-700 pb-1">
+                                          Análise do NCM
+                                        </p>
+                                        <p className="font-bold text-gray-300 mt-1">
+                                          Capítulo {cap}:
+                                        </p>
+                                        <p className="mb-2 leading-tight">
+                                          {descCap}
+                                        </p>
+                                        <p className="font-bold text-blue-300">
+                                          Posição {pos}:
+                                        </p>
+                                        <p className="leading-tight">
+                                          {descPos}
+                                        </p>
+                                      </div>
+                                    </div>
+                                  </div>
+                                </div>
                               </td>
                               <td className="px-4 py-3 text-center">
                                 <button
@@ -1141,7 +1238,7 @@ export function LivroCaixa() {
                               <td className="px-4 py-3 text-sm font-bold text-gray-700 text-right font-mono">
                                 {isDevolucao ? (
                                   <span className="text-sky-600">
-                                    - {formatBRL(valorAbsoluto)}
+                                    - {formatBRL(Math.abs(item.valor))}
                                   </span>
                                 ) : (
                                   formatBRL(item.valor)
@@ -1156,26 +1253,35 @@ export function LivroCaixa() {
                 </>
               ) : (
                 <>
-                  <div className="flex items-center justify-between mb-4">
-                    <h3 className="text-sm font-bold text-gray-400 uppercase tracking-wider">
-                      Agenda de Pagamentos / Recebimentos
-                    </h3>
-                    <span className="text-xs bg-blue-50 text-blue-700 font-bold px-3 py-1 rounded-full border border-blue-200">
-                      O Livro Caixa obedece a estas datas
-                    </span>
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-4">
+                    <div>
+                      <h3 className="text-sm font-bold text-gray-400 uppercase tracking-wider">
+                        Agenda de Pagamentos
+                      </h3>
+                      <p className="text-xs text-gray-500 mt-0.5">
+                        O Livro Caixa será montado com base nestas datas e
+                        valores.
+                      </p>
+                    </div>
+                    <button
+                      onClick={handleAdicionarParcela}
+                      className="flex items-center gap-2 bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100 px-4 py-2 rounded-xl text-sm font-bold transition-colors"
+                    >
+                      <Plus size={16} /> Adicionar Parcela Manual
+                    </button>
                   </div>
+
                   <div className="border border-gray-100 rounded-xl overflow-hidden">
                     <table className="w-full text-left border-collapse">
                       <thead>
                         <tr className="bg-gray-50 border-b border-gray-100 text-xs text-gray-500 uppercase">
+                          <th className="px-4 py-3 font-medium">Nº Parcela</th>
                           <th className="px-4 py-3 font-medium">
-                            Nº da Parcela
+                            Data de Vencimento / Pagto
                           </th>
-                          <th className="px-4 py-3 font-medium">
-                            Data de Vencimento
-                          </th>
-                          <th className="px-4 py-3 font-medium text-right">
-                            Valor da Parcela
+                          <th className="px-4 py-3 font-medium">Valor (R$)</th>
+                          <th className="px-4 py-3 font-medium text-center">
+                            Ação
                           </th>
                         </tr>
                       </thead>
@@ -1184,80 +1290,123 @@ export function LivroCaixa() {
                         selectedNotaModal.parcelas.length === 0 ? (
                           <tr>
                             <td
-                              colSpan={3}
+                              colSpan={4}
                               className="p-8 text-center text-gray-400 text-sm"
                             >
-                              Nenhuma parcela localizada. O valor total foi
-                              lançado à vista.
+                              Nenhuma parcela localizada. Adicione manualmente
+                              se houver.
                             </td>
                           </tr>
                         ) : (
-                          selectedNotaModal.parcelas.map((parcela: any) => (
-                            <tr
-                              key={parcela.id}
-                              className="hover:bg-blue-50/20 transition-colors"
-                            >
-                              <td className="px-4 py-3 text-sm font-bold text-gray-700 font-mono">
-                                Parcela {parcela.numeroParcela}
-                              </td>
-                              <td className="px-4 py-3">
-                                <input
-                                  type="date"
-                                  value={parcela.dataVencimento}
-                                  onChange={(e) => {
-                                    const novaData = e.target.value;
-                                    setSelectedNotaModal((prev: any) => ({
-                                      ...prev,
-                                      parcelas: prev.parcelas.map((p: any) =>
-                                        p.id === parcela.id
-                                          ? { ...p, dataVencimento: novaData }
-                                          : p,
-                                      ),
-                                    }));
-                                  }}
-                                  className="px-3 py-1.5 border border-gray-300 rounded-lg outline-none text-sm font-bold focus:border-blue-400 text-blue-800 bg-blue-50/50 transition-colors"
-                                  title="Altere a data para mudar o mês de impacto no Livro Caixa"
-                                />
-                              </td>
-                              <td className="px-4 py-3 text-sm font-bold text-gray-800 text-right font-mono">
-                                {formatBRL(parcela.valor)}
-                              </td>
-                            </tr>
-                          ))
+                          selectedNotaModal.parcelas.map(
+                            (parcela: any, index: number) => (
+                              <tr
+                                key={parcela.id || index}
+                                className="hover:bg-blue-50/20 transition-colors"
+                              >
+                                <td className="px-4 py-3 text-sm font-bold text-gray-700 font-mono">
+                                  <input
+                                    type="text"
+                                    value={parcela.numeroParcela}
+                                    onChange={(e) => {
+                                      const newVal = e.target.value;
+                                      setSelectedNotaModal((prev: any) => {
+                                        const p = [...prev.parcelas];
+                                        p[index].numeroParcela = newVal;
+                                        return { ...prev, parcelas: p };
+                                      });
+                                    }}
+                                    className="w-16 px-2 py-1 border border-gray-200 rounded text-center outline-none focus:border-blue-400"
+                                  />
+                                </td>
+                                <td className="px-4 py-3">
+                                  <input
+                                    type="date"
+                                    value={parcela.dataVencimento}
+                                    onChange={(e) => {
+                                      const newVal = e.target.value;
+                                      setSelectedNotaModal((prev: any) => {
+                                        const p = [...prev.parcelas];
+                                        p[index].dataVencimento = newVal;
+                                        return { ...prev, parcelas: p };
+                                      });
+                                    }}
+                                    className="px-3 py-1.5 border border-gray-300 rounded-lg outline-none text-sm font-bold focus:border-blue-400 text-blue-800 bg-blue-50/50 transition-colors"
+                                  />
+                                </td>
+                                <td className="px-4 py-3">
+                                  <input
+                                    type="number"
+                                    step="0.01"
+                                    value={parcela.valor}
+                                    onChange={(e) => {
+                                      const newVal =
+                                        parseFloat(e.target.value) || 0;
+                                      setSelectedNotaModal((prev: any) => {
+                                        const p = [...prev.parcelas];
+                                        p[index].valor = newVal;
+                                        return { ...prev, parcelas: p };
+                                      });
+                                    }}
+                                    className="w-32 px-3 py-1.5 border border-gray-300 rounded-lg outline-none text-sm font-mono font-bold text-gray-800 text-right focus:border-blue-400"
+                                  />
+                                </td>
+                                <td className="px-4 py-3 text-center">
+                                  <button
+                                    onClick={() => handleRemoverParcela(index)}
+                                    className="text-gray-400 hover:text-rose-500 p-1.5 rounded-lg hover:bg-rose-50 transition-colors"
+                                  >
+                                    <Trash2 size={16} />
+                                  </button>
+                                </td>
+                              </tr>
+                            ),
+                          )
                         )}
                       </tbody>
                     </table>
                   </div>
-                  <p className="text-xs text-gray-400 mt-4 leading-relaxed bg-gray-50 p-3 rounded-lg border border-gray-100">
-                    <Info size={14} className="inline mr-1" />
-                    <strong>Dica de Ouro:</strong> O Produtor renegociou o
-                    pagamento para o mês da colheita? Altere a data de
-                    vencimento acima e clique em "Salvar Alterações". A linha no
-                    Livro Caixa pulará automaticamente para o mês correto,
-                    protegendo o caixa do produtor da malha fina.
-                  </p>
+
+                  {selectedNotaModal.parcelas &&
+                    selectedNotaModal.parcelas.length > 0 && (
+                      <div
+                        className={`mt-4 p-4 rounded-xl border ${Math.abs(selectedNotaModal.parcelas.reduce((a: any, p: any) => a + Number(p.valor), 0) - selectedNotaModal.valorTotal) > 0.1 ? "bg-amber-50 border-amber-200" : "bg-gray-50 border-gray-200"} flex justify-between items-center`}
+                      >
+                        <p className="text-sm text-gray-600">
+                          Soma das Parcelas:
+                        </p>
+                        <p
+                          className={`text-xl font-black font-mono ${Math.abs(selectedNotaModal.parcelas.reduce((a: any, p: any) => a + Number(p.valor), 0) - selectedNotaModal.valorTotal) > 0.1 ? "text-amber-600" : "text-emerald-600"}`}
+                        >
+                          {formatBRL(
+                            selectedNotaModal.parcelas.reduce(
+                              (a: any, p: any) => a + Number(p.valor),
+                              0,
+                            ),
+                          )}
+                        </p>
+                      </div>
+                    )}
                 </>
               )}
             </div>
 
             <div className="p-6 border-t border-gray-100 bg-gray-50 flex justify-between items-center">
-              <div className="flex gap-3">
-                <button
-                  onClick={salvarAlteracoesNota}
-                  disabled={isLoading}
-                  className="flex items-center gap-2 px-6 py-2.5 bg-agro-secondary hover:bg-agro-primary text-white font-bold rounded-xl shadow-sm transition-all"
-                >
-                  {isLoading ? (
-                    <Loader2 size={18} className="animate-spin" />
-                  ) : (
-                    <Save size={18} />
-                  )}
-                  Salvar Alterações
-                </button>
-              </div>
+              <button
+                onClick={salvarAlteracoesNota}
+                disabled={isLoading}
+                className="flex items-center gap-2 px-8 py-3 bg-agro-secondary hover:bg-agro-primary text-white font-bold rounded-xl shadow-sm transition-all text-sm"
+              >
+                {isLoading ? (
+                  <Loader2 size={18} className="animate-spin" />
+                ) : (
+                  <Save size={18} />
+                )}
+                Salvar Toda a Nota (Itens e Parcelas)
+              </button>
               <div className="text-right">
                 <p className="text-sm text-gray-500">Valor Total da Nota</p>
-                <p className="text-2xl font-bold text-gray-800">
+                <p className="text-2xl font-bold text-gray-800 font-mono">
                   {formatBRL(selectedNotaModal.valorTotal)}
                 </p>
               </div>
