@@ -44,6 +44,131 @@ type NotaFiscal = {
   parcelas?: any[];
 };
 
+// ==========================================
+// MOTOR DE ANÁLISE DE CFOP (BASEADO NO SUFIXO)
+// ==========================================
+const getCFOPInfo = (cfopStr?: string) => {
+  if (!cfopStr || cfopStr.length < 4)
+    return {
+      tipo: "Desconhecido",
+      descricao: "CFOP inválido ou não informado.",
+      cor: "bg-gray-100 text-gray-700 border-gray-200",
+    };
+
+  const sufixo = cfopStr.substring(1);
+
+  if (
+    [
+      "101",
+      "102",
+      "401",
+      "403",
+      "405",
+      "551",
+      "352",
+      "353",
+      "356",
+      "253",
+      "255",
+      "257",
+    ].includes(sufixo)
+  ) {
+    let desc = "";
+    if (["101", "102"].includes(sufixo))
+      desc =
+        "Venda de produção própria ou de terceiros (sementes, defensivos, adubos, ferramentas).";
+    else if (["401", "403", "405"].includes(sufixo))
+      desc =
+        "Venda de mercadoria com substituição tributária (óleos, autopeças, pneus).";
+    else if (["551"].includes(sufixo))
+      desc =
+        "Venda de bem do ativo imobilizado (compra de maquinário ou implementos).";
+    else if (["352", "353", "356"].includes(sufixo))
+      desc =
+        "Prestações de serviço de transporte (frete pago sobre a compra de insumos).";
+    else if (["253", "255", "257"].includes(sufixo))
+      desc =
+        "Venda de energia elétrica (deve estar vinculada aos medidores da produção).";
+    return {
+      tipo: "Dedutibilidade Automática",
+      descricao: desc,
+      cor: "bg-emerald-50 text-emerald-800 border-emerald-200",
+    };
+  }
+
+  if (
+    [
+      "901",
+      "902",
+      "903",
+      "904",
+      "905",
+      "906",
+      "907",
+      "910",
+      "911",
+      "912",
+      "913",
+      "915",
+      "916",
+      "201",
+      "202",
+      "210",
+      "411",
+      "908",
+      "909",
+    ].includes(sufixo)
+  ) {
+    let desc = "";
+    if (["901", "902", "903"].includes(sufixo))
+      desc =
+        "Remessas para venda fora do estabelecimento ou vendas já faturadas anteriormente.";
+    else if (["904", "905", "906", "907"].includes(sufixo))
+      desc =
+        "Remessas para depósito fechado, armazém geral ou estocagem (não há compra, apenas guarda).";
+    else if (["910", "911", "912", "913"].includes(sufixo))
+      desc = "Remessas para demonstração, mostruário ou feiras.";
+    else if (["915", "916"].includes(sufixo))
+      desc =
+        "Remessa para conserto ou manutenção (a peça nova é dedutível pelo X.102, mas a remessa para oficina não é).";
+    else if (["201", "202", "210", "411"].includes(sufixo))
+      desc =
+        "Devoluções de vendas ou compras (não representam despesa operável).";
+    else if (["908", "909"].includes(sufixo))
+      desc = "Remessa de bens por contrato de comodato.";
+    return {
+      tipo: "Bloqueio (Não Dedutível)",
+      descricao: desc,
+      cor: "bg-rose-50 text-rose-800 border-rose-200",
+    };
+  }
+
+  if (["556", "407", "653", "922", "923"].includes(sufixo)) {
+    let desc = "";
+    if (["556", "407"].includes(sufixo))
+      desc =
+        "Venda de material de uso e consumo. No agro, pode ser um item dedutível de manutenção, mas vale uma conferência manual.";
+    else if (["653"].includes(sufixo))
+      desc =
+        "Venda de combustível. ATENÇÃO: Se Diesel para trator = Dedutível. Se Gasolina/Etanol para carro de passeio = Uso Pessoal (Não dedutível).";
+    else if (["922", "923"].includes(sufixo))
+      desc =
+        "Simples faturamento. A despesa só poderá entrar no Livro Caixa quando houver o pagamento efetivo e a entrega física da mercadoria.";
+    return {
+      tipo: "Alerta (Análise Humana)",
+      descricao: desc,
+      cor: "bg-amber-50 text-amber-800 border-amber-200",
+    };
+  }
+
+  return {
+    tipo: "Não Mapeado / Outros",
+    descricao:
+      "Este CFOP não se enquadra nas regras automáticas principais. Verifique a natureza da operação do XML.",
+    cor: "bg-gray-50 text-gray-700 border-gray-200",
+  };
+};
+
 export function NotasFiscais() {
   const baseUrl = import.meta.env.VITE_API_URL;
   const { currentProducer, currentProperty } = useProducer();
@@ -108,6 +233,13 @@ export function NotasFiscais() {
     pos: string;
     descCap: string;
     descPos: string;
+  } | null>(null);
+
+  const [cfopModalData, setCfopModalData] = useState<{
+    cfop: string;
+    tipo: string;
+    descricao: string;
+    cor: string;
   } | null>(null);
 
   const obterParametrosDeData = useCallback(
@@ -318,7 +450,6 @@ export function NotasFiscais() {
       });
       if (res.ok) {
         const data = await res.json();
-        // CORREÇÃO CIRÚRGICA DE ORDENAÇÃO DE PARCELAS
         if (data.parcelas) {
           data.parcelas.sort((a: any, b: any) =>
             String(a.numeroParcela).localeCompare(String(b.numeroParcela)),
@@ -499,13 +630,13 @@ export function NotasFiscais() {
       style: "currency",
       currency: "BRL",
     }).format(valor);
+
   const formatarData = (dataString: string) => {
     if (!dataString) return "";
     const [ano, mes, dia] = dataString.split("-");
     return `${dia}/${mes}/${ano}`;
   };
 
-  // CÁLCULOS DO RODAPÉ (LCDPR) - Evita chamar dentro do return do modal
   const totalDedutivelModal =
     selectedNotaModal?.itens?.reduce(
       (acc: number, item: any) =>
@@ -537,9 +668,7 @@ export function NotasFiscais() {
         </div>
 
         <div className="flex flex-col lg:flex-row items-center gap-3">
-          {/* BARRA DE FILTROS UNIFICADA */}
           <div className="flex items-center gap-1 bg-white p-1 rounded-xl border border-gray-200 shadow-sm flex-wrap justify-center relative w-full lg:w-auto">
-            {/* Anos */}
             {botoesAnosRapidos.map((ano) => (
               <button
                 key={ano}
@@ -587,7 +716,6 @@ export function NotasFiscais() {
 
             <div className="w-px h-5 bg-gray-200 mx-1 hidden sm:block"></div>
 
-            {/* Períodos */}
             {["Hoje", "Este Mês", "Tudo"].map((filter) => (
               <button
                 key={filter}
@@ -789,6 +917,9 @@ export function NotasFiscais() {
         )}
       </div>
 
+      {/* ============================================================== */}
+      {/* MODAL: DETALHES DA NOTA (ITENS, PARCELAS E CLASSIFICAÇÃO) */}
+      {/* ============================================================== */}
       {selectedNotaModal && (
         <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-6xl overflow-hidden flex flex-col max-h-[90vh]">
@@ -803,7 +934,6 @@ export function NotasFiscais() {
                     {selectedNotaModal.empresaEnvolvida} • Emissão:{" "}
                     {formatarData(selectedNotaModal.dataEmissao)}
                   </p>
-                  {/* ALERTA DE VÍNCULO DE DEVOLUÇÃO */}
                   {selectedNotaModal.chaveAcessoReferencia && (
                     <div className="mt-3 p-2.5 bg-sky-50 border border-sky-100 rounded-lg flex items-start gap-2 max-w-xl">
                       <RotateCcw
@@ -882,13 +1012,12 @@ export function NotasFiscais() {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-gray-100">
-                        {selectedNotaModal.itens.map((item) => {
+                        {selectedNotaModal.itens.map((item: any) => {
                           const isDevolucao =
-                            item.descricao.includes("[DEVOLUÇÃO]");
+                            item.descricao?.includes("[DEVOLUÇÃO]");
                           const descricaoLimpa = item.descricao
-                            .replace("[DEVOLUÇÃO]", "")
-                            .trim();
-                          const valorAbsoluto = Math.abs(item.valor);
+                            ? item.descricao.replace("[DEVOLUÇÃO]", "").trim()
+                            : "Produto sem descrição";
 
                           const cap = item.ncm
                             ? item.ncm.substring(0, 2)
@@ -905,22 +1034,38 @@ export function NotasFiscais() {
                             <tr key={item.id} className="hover:bg-gray-50/50">
                               <td className="px-4 py-3 text-sm font-medium text-gray-800">
                                 {isDevolucao ? (
-                                  <span
-                                    className="text-sky-600 flex items-center gap-1.5 font-bold"
-                                    title="Item de Devolução/Estorno"
-                                  >
-                                    <RotateCcw size={14} strokeWidth={3} />{" "}
+                                  <span className="text-sky-600 font-bold">
+                                    <RotateCcw
+                                      size={14}
+                                      className="inline mr-1"
+                                    />
                                     {descricaoLimpa}
                                   </span>
                                 ) : (
-                                  item.descricao
+                                  descricaoLimpa
                                 )}
                               </td>
                               <td className="px-4 py-3 text-center">
                                 {item.cfop ? (
-                                  <span className="text-[11px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-100 px-2 py-0.5 rounded shadow-sm">
-                                    {item.cfop}
-                                  </span>
+                                  <div className="flex items-center justify-center gap-1.5">
+                                    <span className="text-[11px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-100 px-2 py-0.5 rounded shadow-sm">
+                                      {item.cfop}
+                                    </span>
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        setCfopModalData({
+                                          cfop: item.cfop,
+                                          ...getCFOPInfo(item.cfop),
+                                        });
+                                      }}
+                                      className="text-emerald-500 hover:text-emerald-700 transition-colors p-1"
+                                      title="Ver detalhes do CFOP"
+                                    >
+                                      <Info size={14} />
+                                    </button>
+                                  </div>
                                 ) : (
                                   <span className="text-gray-400 font-mono text-sm">
                                     -
@@ -965,7 +1110,7 @@ export function NotasFiscais() {
                               <td className="px-4 py-3 text-sm font-bold text-gray-700 text-right font-mono">
                                 {isDevolucao ? (
                                   <span className="text-sky-600">
-                                    - {formatBRL(valorAbsoluto)}
+                                    - {formatBRL(Math.abs(item.valor))}
                                   </span>
                                 ) : (
                                   formatBRL(item.valor)
@@ -1149,7 +1294,7 @@ export function NotasFiscais() {
                     <Loader2 size={18} className="animate-spin" />
                   ) : (
                     <Save size={18} />
-                  )}{" "}
+                  )}
                   Salvar Toda a Nota
                 </button>
                 <button
@@ -1160,7 +1305,6 @@ export function NotasFiscais() {
                   <Trash2 size={18} /> Excluir
                 </button>
               </div>
-
               <div className="flex items-center gap-6 w-full md:w-auto justify-between md:justify-end">
                 <div className="hidden sm:block border-r border-gray-200 pr-6 text-right">
                   <p className="text-xs font-bold text-gray-500 mb-1 uppercase tracking-wider">
@@ -1207,7 +1351,250 @@ export function NotasFiscais() {
         </div>
       )}
 
-      {/* MINI-MODAL DO DETALHAMENTO DO NCM */}
+      {/* ============================================================== */}
+      {/* MODAL: APAGAR NOTAS SELECIONADAS */}
+      {/* ============================================================== */}
+      {isDeleteModalOpen && (
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden flex flex-col">
+            <div className="p-6 border-b border-gray-100 flex items-center justify-between">
+              <h2 className="text-xl font-bold text-rose-600 flex items-center gap-2">
+                <Trash2 /> Apagar Notas Selecionadas
+              </h2>
+              <button
+                onClick={() => setIsDeleteModalOpen(false)}
+                className="p-2 hover:bg-gray-100 rounded-lg text-gray-400"
+              >
+                <X size={20} />
+              </button>
+            </div>
+            <div className="p-6 space-y-4">
+              <p className="text-sm text-gray-600">
+                Atenção: Você está prestes a excluir **todas as notas** do
+                período selecionado atualmente: <strong>{activePeriod}</strong>.
+              </p>
+              <div className="bg-rose-50 p-3 rounded-lg border border-rose-100 text-xs text-rose-700 font-medium">
+                ⚠️ Aviso: A exclusão abrange todas as notas importadas dentro do
+                período selecionado. Esta ação não pode ser desfeita.
+              </div>
+            </div>
+            <div className="p-6 border-t border-gray-100 bg-gray-50 flex justify-end gap-3">
+              <button
+                onClick={() => setIsDeleteModalOpen(false)}
+                disabled={isLoading}
+                className="px-5 py-2.5 text-sm font-medium text-gray-600 hover:bg-gray-200 rounded-xl"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={confirmarExclusaoEmMassa}
+                disabled={isLoading}
+                className="px-5 py-2.5 text-sm font-medium text-white bg-rose-600 hover:bg-rose-500 rounded-xl flex items-center gap-2"
+              >
+                {isLoading ? (
+                  <>
+                    <Loader2 size={16} className="animate-spin" /> Apagando...
+                  </>
+                ) : (
+                  "Confirmar Exclusão"
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ============================================================== */}
+      {/* MODAL: IMPORTAÇÃO (XML) */}
+      {/* ============================================================== */}
+      {isImportModalOpen && (
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg overflow-hidden flex flex-col max-h-[90vh]">
+            <div className="p-6 border-b border-gray-100 flex items-center justify-between">
+              <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2">
+                <UploadCloud className="text-emerald-600" /> Importar XML
+              </h2>
+              <button
+                onClick={() => {
+                  setIsImportModalOpen(false);
+                  setSelectedFiles([]);
+                }}
+                className="p-2 hover:bg-gray-100 rounded-lg text-gray-400"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            <div className="bg-slate-50 border border-slate-200 p-4 mx-6 mt-6 rounded-xl flex items-start gap-3 shadow-sm">
+              <div className="text-slate-400 mt-0.5">
+                <Info size={18} />
+              </div>
+              <div>
+                <p className="text-sm text-slate-700 font-bold">
+                  Destino Automático / Manual:
+                </p>
+                <p className="text-xs text-slate-500 mt-1 leading-relaxed">
+                  O sistema tentará ler a <b>Inscrição Estadual</b> do XML. Se
+                  não encontrar, a nota será salva em: <br />
+                  <span className="font-bold text-agro-secondary">
+                    {currentProperty
+                      ? currentProperty.nome
+                      : "Propriedade Padrão (Consolidado)"}
+                  </span>
+                  .
+                </p>
+              </div>
+            </div>
+            <div className="p-6 overflow-y-auto space-y-4">
+              {uploadMessage.text && (
+                <div
+                  className={`flex items-center gap-2.5 px-4 py-3 rounded-xl text-sm font-medium border ${uploadMessage.type === "error" ? "bg-rose-50 border-rose-200 text-rose-700" : "bg-emerald-50 border-emerald-200 text-emerald-700"}`}
+                >
+                  {uploadMessage.type === "error" ? (
+                    <AlertCircle size={18} />
+                  ) : (
+                    <CheckCircle size={18} />
+                  )}{" "}
+                  {uploadMessage.text}
+                </div>
+              )}
+              <label className="border-2 border-dashed border-emerald-200 rounded-xl p-8 flex flex-col items-center justify-center gap-3 bg-emerald-50/30 hover:bg-emerald-50 transition-colors cursor-pointer group">
+                <input
+                  type="file"
+                  multiple
+                  accept=".xml"
+                  className="hidden"
+                  onChange={handleFileSelect}
+                  disabled={isUploading}
+                />
+                <div className="w-14 h-14 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center group-hover:scale-110 transition-transform">
+                  <FileText size={28} />
+                </div>
+                <div className="text-center">
+                  <p className="text-sm font-semibold text-emerald-800">
+                    Clique para anexar XMLs
+                  </p>
+                </div>
+              </label>
+              {selectedFiles.length > 0 && (
+                <div className="mt-4 max-h-40 overflow-y-auto space-y-2 pr-2">
+                  {selectedFiles.map((file, index) => (
+                    <div
+                      key={index}
+                      className="flex items-center justify-between bg-gray-50 border border-gray-100 p-2.5 rounded-lg"
+                    >
+                      <span className="text-sm font-medium text-gray-700 truncate">
+                        {file.name}
+                      </span>
+                      <button
+                        onClick={() =>
+                          setSelectedFiles((prev) =>
+                            prev.filter((_, i) => i !== index),
+                          )
+                        }
+                        disabled={isUploading}
+                        className="text-gray-400 hover:text-rose-500 p-1"
+                      >
+                        <X size={16} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+            <div className="p-6 border-t border-gray-100 bg-gray-50 flex items-center justify-end gap-3">
+              <button
+                onClick={() => {
+                  setIsImportModalOpen(false);
+                  setSelectedFiles([]);
+                }}
+                disabled={isUploading}
+                className="px-5 py-2.5 text-sm font-medium text-gray-600 hover:bg-gray-200 rounded-xl"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleUploadXMLs}
+                disabled={isUploading || selectedFiles.length === 0}
+                className="px-5 py-2.5 text-sm font-medium text-white bg-emerald-600 hover:bg-emerald-500 rounded-xl flex items-center gap-2"
+              >
+                {isUploading ? (
+                  <>
+                    <Loader2 size={18} className="animate-spin" />{" "}
+                    Processando...
+                  </>
+                ) : (
+                  "Iniciar Importação"
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ============================================================== */}
+      {/* MODAL: DATA PERSONALIZADA */}
+      {/* ============================================================== */}
+      {showCustomDateModal && (
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm overflow-hidden">
+            <div className="p-5 border-b border-gray-100 flex justify-between items-center bg-gray-50">
+              <h2 className="font-bold text-gray-800 flex items-center gap-2">
+                <CalendarDays size={18} className="text-agro-secondary" />{" "}
+                Período Específico
+              </h2>
+              <button
+                onClick={() => setShowCustomDateModal(false)}
+                className="text-gray-400 hover:text-gray-600"
+              >
+                <X size={20} />
+              </button>
+            </div>
+            <div className="p-6 space-y-4">
+              <div>
+                <label className="block text-sm font-bold text-gray-600 mb-1">
+                  Data de Início
+                </label>
+                <input
+                  type="date"
+                  value={tempStartDate}
+                  onChange={(e) => setTempStartDate(e.target.value)}
+                  className="w-full px-4 py-2.5 bg-white border border-gray-200 rounded-xl outline-none focus:border-agro-secondary"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-bold text-gray-600 mb-1">
+                  Data Final
+                </label>
+                <input
+                  type="date"
+                  value={tempEndDate}
+                  onChange={(e) => setTempEndDate(e.target.value)}
+                  className="w-full px-4 py-2.5 bg-white border border-gray-200 rounded-xl outline-none focus:border-agro-secondary"
+                />
+              </div>
+            </div>
+            <div className="p-5 border-t border-gray-100 bg-gray-50 flex justify-end gap-3">
+              <button
+                onClick={() => setShowCustomDateModal(false)}
+                className="px-5 py-2.5 text-sm font-medium text-gray-600 hover:bg-gray-200 rounded-xl transition-colors"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={aplicarFiltroPersonalizado}
+                className="px-5 py-2.5 text-sm font-bold text-white bg-agro-secondary hover:bg-agro-primary rounded-xl shadow-sm transition-colors"
+              >
+                Aplicar Filtro
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ============================================================== */}
+      {/* MINI-MODAL: DETALHAMENTO DO NCM */}
+      {/* ============================================================== */}
       {ncmModalData && (
         <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-[110] flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm overflow-hidden flex flex-col animate-in zoom-in-95 duration-200">
@@ -1254,6 +1641,63 @@ export function NotasFiscais() {
               <button
                 onClick={() => setNcmModalData(null)}
                 className="px-6 py-2.5 text-sm font-bold text-white bg-emerald-600 hover:bg-emerald-500 rounded-xl shadow-sm transition-colors"
+              >
+                Entendi
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ============================================================== */}
+      {/* MINI-MODAL: DETALHAMENTO DO CFOP */}
+      {/* ============================================================== */}
+      {cfopModalData && (
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-[110] flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm overflow-hidden flex flex-col animate-in zoom-in-95 duration-200">
+            <div className="p-5 border-b border-gray-100 flex items-center justify-between bg-gray-50">
+              <h2 className="font-bold text-gray-800 flex items-center gap-2">
+                <Info size={18} className="text-blue-600" /> Regra do CFOP
+              </h2>
+              <button
+                onClick={() => setCfopModalData(null)}
+                className="p-1.5 hover:bg-gray-200 rounded-lg text-gray-400 transition-colors"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-4">
+              <div
+                className={`font-mono font-bold px-3 py-2 rounded-lg text-center text-lg border shadow-sm ${cfopModalData.cor}`}
+              >
+                {cfopModalData.cfop}
+              </div>
+
+              <div className="space-y-1.5 text-center">
+                <span
+                  className={`inline-block px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider border ${cfopModalData.cor}`}
+                >
+                  {cfopModalData.tipo}
+                </span>
+              </div>
+
+              <div className="w-full h-px bg-gray-100" />
+
+              <div className="space-y-1.5">
+                <p className="font-bold text-gray-400 uppercase tracking-wider text-[10px]">
+                  Análise da Operação
+                </p>
+                <p className="font-semibold text-gray-800 text-sm leading-relaxed">
+                  {cfopModalData.descricao}
+                </p>
+              </div>
+            </div>
+
+            <div className="p-5 border-t border-gray-100 bg-gray-50 flex justify-end">
+              <button
+                onClick={() => setCfopModalData(null)}
+                className="px-6 py-2.5 text-sm font-bold text-white bg-slate-800 hover:bg-slate-900 rounded-xl shadow-sm transition-colors"
               >
                 Entendi
               </button>
