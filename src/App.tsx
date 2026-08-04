@@ -18,6 +18,7 @@ import { AdminDashboardLayout } from "./components/AdminDashboardLayout";
 import { VisaoGeralSaaS } from "./screens/VisaoGeralSaaS";
 import { AdminContadores } from "./screens/AdminContadores";
 import { ConfiguracoesMaster } from "./screens/ConfiguracoesMaster";
+import { RegrasGlobaisSaaS } from "./screens/RegrasGlobaisSaaS";
 
 export default function App() {
   return (
@@ -35,6 +36,7 @@ export default function App() {
             <Route index element={<VisaoGeralSaaS />} />
             <Route path="contadores" element={<AdminContadores />} />
             <Route path="configuracoes" element={<ConfiguracoesMaster />} />
+            <Route path="regras-fiscais" element={<RegrasGlobaisSaaS />} />
           </Route>
 
           {/*ROTA DO SISTEMA (CONTADOR / PRODUTOR)*/}

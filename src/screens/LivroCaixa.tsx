@@ -60,6 +60,135 @@ const TIPOS_DOCUMENTO = [
   { id: "6", label: "6 - Outros (Taxas/Guias)" },
 ];
 
+// ==========================================
+// MOTOR DE ANÁLISE DE CFOP (BASEADO NO SUFIXO)
+// ==========================================
+const getCFOPInfo = (cfopStr?: string) => {
+  if (!cfopStr || cfopStr.length < 4)
+    return {
+      tipo: "Desconhecido",
+      descricao: "CFOP inválido ou não informado.",
+      cor: "bg-gray-100 text-gray-700 border-gray-200",
+    };
+
+  // Ignora o primeiro dígito (5 ou 6) e pega os últimos 3
+  const sufixo = cfopStr.substring(1);
+
+  // GRUPO 1: Dedutibilidade Automática 🟢
+  if (
+    [
+      "101",
+      "102",
+      "401",
+      "403",
+      "405",
+      "551",
+      "352",
+      "353",
+      "356",
+      "253",
+      "255",
+      "257",
+    ].includes(sufixo)
+  ) {
+    let desc = "";
+    if (["101", "102"].includes(sufixo))
+      desc =
+        "Venda de produção própria ou de terceiros (sementes, defensivos, adubos, ferramentas).";
+    else if (["401", "403", "405"].includes(sufixo))
+      desc =
+        "Venda de mercadoria com substituição tributária (óleos, autopeças, pneus).";
+    else if (["551"].includes(sufixo))
+      desc =
+        "Venda de bem do ativo imobilizado (compra de maquinário ou implementos).";
+    else if (["352", "353", "356"].includes(sufixo))
+      desc =
+        "Prestações de serviço de transporte (frete pago sobre a compra de insumos).";
+    else if (["253", "255", "257"].includes(sufixo))
+      desc =
+        "Venda de energia elétrica (deve estar vinculada aos medidores da produção).";
+    return {
+      tipo: "Dedutibilidade Automática",
+      descricao: desc,
+      cor: "bg-emerald-50 text-emerald-800 border-emerald-200",
+    };
+  }
+
+  // GRUPO 2: Bloqueio Automático (Não Dedutíveis) 🔴
+  if (
+    [
+      "901",
+      "902",
+      "903",
+      "904",
+      "905",
+      "906",
+      "907",
+      "910",
+      "911",
+      "912",
+      "913",
+      "915",
+      "916",
+      "201",
+      "202",
+      "210",
+      "411",
+      "908",
+      "909",
+    ].includes(sufixo)
+  ) {
+    let desc = "";
+    if (["901", "902", "903"].includes(sufixo))
+      desc =
+        "Remessas para venda fora do estabelecimento ou vendas já faturadas anteriormente.";
+    else if (["904", "905", "906", "907"].includes(sufixo))
+      desc =
+        "Remessas para depósito fechado, armazém geral ou estocagem (não há compra, apenas guarda).";
+    else if (["910", "911", "912", "913"].includes(sufixo))
+      desc = "Remessas para demonstração, mostruário ou feiras.";
+    else if (["915", "916"].includes(sufixo))
+      desc =
+        "Remessa para conserto ou manutenção (a peça nova é dedutível pelo X.102, mas a remessa para oficina não é).";
+    else if (["201", "202", "210", "411"].includes(sufixo))
+      desc =
+        "Devoluções de vendas ou compras (não representam despesa operável).";
+    else if (["908", "909"].includes(sufixo))
+      desc = "Remessa de bens por contrato de comodato.";
+    return {
+      tipo: "Bloqueio (Não Dedutível)",
+      descricao: desc,
+      cor: "bg-rose-50 text-rose-800 border-rose-200",
+    };
+  }
+
+  // GRUPO 3: Alerta para Análise Humana 🟡
+  if (["556", "407", "653", "922", "923"].includes(sufixo)) {
+    let desc = "";
+    if (["556", "407"].includes(sufixo))
+      desc =
+        "Venda de material de uso e consumo. No agro, pode ser um item dedutível de manutenção, mas vale uma conferência manual.";
+    else if (["653"].includes(sufixo))
+      desc =
+        "Venda de combustível. ATENÇÃO: Se Diesel para trator = Dedutível. Se Gasolina/Etanol para carro de passeio = Uso Pessoal (Não dedutível).";
+    else if (["922", "923"].includes(sufixo))
+      desc =
+        "Simples faturamento. A despesa só poderá entrar no Livro Caixa quando houver o pagamento efetivo e a entrega física da mercadoria.";
+    return {
+      tipo: "Alerta (Análise Humana)",
+      descricao: desc,
+      cor: "bg-amber-50 text-amber-800 border-amber-200",
+    };
+  }
+
+  return {
+    tipo: "Não Mapeado / Outros",
+    descricao:
+      "Este CFOP não se enquadra nas regras automáticas principais. Verifique a natureza da operação do XML.",
+    cor: "bg-gray-50 text-gray-700 border-gray-200",
+  };
+};
+
 export function LivroCaixa() {
   const { currentProducer, currentProperty } = useProducer();
   const baseUrl = import.meta.env.VITE_API_URL;
@@ -88,11 +217,26 @@ export function LivroCaixa() {
   const [isSaving, setIsSaving] = useState(false);
   const [feedback, setFeedback] = useState({ text: "", type: "" });
 
-  // Estados do Modal da Nota Fiscal
   const [selectedNotaModal, setSelectedNotaModal] = useState<any | null>(null);
   const [activeTabModal, setActiveTabModal] = useState<"itens" | "parcelas">(
     "itens",
   );
+
+  const [ncmModalData, setNcmModalData] = useState<{
+    ncm: string;
+    cap: string;
+    pos: string;
+    descCap: string;
+    descPos: string;
+  } | null>(null);
+
+  // NOVO ESTADO: Modal do CFOP
+  const [cfopModalData, setCfopModalData] = useState<{
+    cfop: string;
+    tipo: string;
+    descricao: string;
+    cor: string;
+  } | null>(null);
 
   const [fornecedores, setFornecedores] = useState<any[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
@@ -238,7 +382,6 @@ export function LivroCaixa() {
     }
   };
 
-  // Alterada para aceitar "preserveTab", útil para quando recarregamos a nota pelo botão Restaurar
   const abrirNotaVinculada = async (notaId?: number, preserveTab = false) => {
     if (!notaId) return;
     setIsLoading(true);
@@ -248,7 +391,13 @@ export function LivroCaixa() {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (res.ok) {
-        setSelectedNotaModal(await res.json());
+        const data = await res.json();
+        if (data.parcelas) {
+          data.parcelas.sort((a: any, b: any) =>
+            String(a.numeroParcela).localeCompare(String(b.numeroParcela)),
+          );
+        }
+        setSelectedNotaModal(data);
         if (!preserveTab) setActiveTabModal("itens");
       }
     } catch (err) {
@@ -272,29 +421,26 @@ export function LivroCaixa() {
     }
   };
 
-  // --- FUNÇÕES DE MANIPULAÇÃO MANUAL DE PARCELAS ---
   const handleAdicionarParcela = () => {
     if (!selectedNotaModal) return;
     const novaParcela = {
-      id: null, // Sem ID para o backend identificar como nova
-      numeroParcela: String(selectedNotaModal.parcelas.length + 1).padStart(
-        3,
-        "0",
-      ),
+      id: null,
+      numeroParcela: String(
+        (selectedNotaModal.parcelas?.length || 0) + 1,
+      ).padStart(3, "0"),
       dataVencimento: selectedNotaModal.dataEmissao,
       valor: 0,
     };
     setSelectedNotaModal({
       ...selectedNotaModal,
-      parcelas: [...selectedNotaModal.parcelas, novaParcela],
+      parcelas: [...(selectedNotaModal.parcelas || []), novaParcela],
     });
   };
 
   const handleRemoverParcela = (index: number) => {
-    if (!selectedNotaModal) return;
+    if (!selectedNotaModal || !selectedNotaModal.parcelas) return;
     const novasParcelas = [...selectedNotaModal.parcelas];
     novasParcelas.splice(index, 1);
-    // Reorganiza a numeração
     novasParcelas.forEach(
       (p, i) => (p.numeroParcela = String(i + 1).padStart(3, "0")),
     );
@@ -304,17 +450,19 @@ export function LivroCaixa() {
   const salvarAlteracoesNota = async () => {
     if (!selectedNotaModal) return;
 
-    // Validação Fiscal: A soma das parcelas deve bater com o total da nota
-    const somaParcelas = selectedNotaModal.parcelas.reduce(
-      (acc: number, p: any) => acc + Number(p.valor),
-      0,
-    );
-    // Margem de erro de 10 centavos por arredondamento
-    if (Math.abs(somaParcelas - selectedNotaModal.valorTotal) > 0.1) {
-      alert(
-        `Atenção: A soma das parcelas (${formatBRL(somaParcelas)}) não confere com o total da nota (${formatBRL(selectedNotaModal.valorTotal)}). Ajuste os valores antes de salvar.`,
-      );
-      return;
+    const somaParcelas =
+      selectedNotaModal.parcelas?.reduce(
+        (acc: number, p: any) => acc + Number(p.valor),
+        0,
+      ) || 0;
+
+    if (selectedNotaModal.parcelas && selectedNotaModal.parcelas.length > 0) {
+      if (Math.abs(somaParcelas - selectedNotaModal.valorTotal) > 0.1) {
+        alert(
+          `Atenção: A soma das parcelas (${formatBRL(somaParcelas)}) não confere com o total da nota (${formatBRL(selectedNotaModal.valorTotal)}). Ajuste os valores antes de salvar.`,
+        );
+        return;
+      }
     }
 
     setIsLoading(true);
@@ -456,6 +604,24 @@ export function LivroCaixa() {
       setIsLoading(false);
     }
   };
+
+  const totalDedutivelModal =
+    selectedNotaModal?.itens?.reduce(
+      (acc: number, item: any) =>
+        acc + (item.isDedutivel ? Number(item.valor) : 0),
+      0,
+    ) || 0;
+  const totalNaoDedutivelModal =
+    selectedNotaModal?.itens?.reduce(
+      (acc: number, item: any) =>
+        acc + (!item.isDedutivel ? Number(item.valor) : 0),
+      0,
+    ) || 0;
+  const basePercModal = totalDedutivelModal + totalNaoDedutivelModal;
+  const percDedutivelModal =
+    basePercModal > 0 ? (totalDedutivelModal / basePercModal) * 100 : 0;
+  const percNaoDedutivelModal =
+    basePercModal > 0 ? (totalNaoDedutivelModal / basePercModal) * 100 : 0;
 
   return (
     <div className="space-y-6 pb-10">
@@ -610,7 +776,7 @@ export function LivroCaixa() {
                           <th className="w-32">Documento</th>
                           <th>Histórico do Lançamento</th>
                           <th className="w-24 text-center">Origem</th>
-                          <th className="w-24 text-center">Dedutível?</th>
+                          <th className="w-24 text-center">Lançar?</th>
                           <th className="w-32 text-right">Entrada</th>
                           <th className="w-32 text-right">Saída</th>
                           <th className="w-12 text-center">Ações</th>
@@ -620,6 +786,11 @@ export function LivroCaixa() {
                         {mesDados.lancamentos.map((lanc) => {
                           const isDevolucao = lanc.valor < 0;
                           const valorAbsoluto = Math.abs(lanc.valor);
+                          const historicoLimpo = lanc.historico.replace(
+                            /Parc\s(\d+)\/\d+\s-/,
+                            "Parc $1 -",
+                          );
+
                           return (
                             <tr
                               key={lanc.id}
@@ -637,9 +808,9 @@ export function LivroCaixa() {
                               </td>
                               <td
                                 className="truncate max-w-[250px]"
-                                title={lanc.historico}
+                                title={historicoLimpo}
                               >
-                                {lanc.historico}
+                                {historicoLimpo}
                               </td>
                               <td className="text-center">
                                 <span
@@ -1000,7 +1171,7 @@ export function LivroCaixa() {
                       />
                       <div className="text-xs">
                         <p className="font-bold text-gray-700">
-                          Despesa Dedutível
+                          Lançar no Livro
                         </p>
                         <p className="text-[10px] text-gray-400">
                           Abate imposto no LCDPR
@@ -1095,7 +1266,7 @@ export function LivroCaixa() {
                     : "border-transparent text-gray-500 hover:text-gray-700"
                 }`}
               >
-                <ListOrdered size={16} /> Produtos e Dedutibilidade
+                <ListOrdered size={16} /> Produtos e Classificação
               </button>
               <button
                 onClick={() => setActiveTabModal("parcelas")}
@@ -1129,7 +1300,7 @@ export function LivroCaixa() {
                             NCM
                           </th>
                           <th className="px-4 py-3 font-medium text-center">
-                            Dedutibilidade (LCDPR)
+                            Livro Caixa
                           </th>
                           <th className="px-4 py-3 font-medium text-right">
                             Valor Unitário
@@ -1170,44 +1341,53 @@ export function LivroCaixa() {
                                   descricaoLimpa
                                 )}
                               </td>
-                              {/* CFOP SEPARADO E COM BADGE VISUAL */}
                               <td className="px-4 py-3 text-center">
                                 {item.cfop ? (
-                                  <span className="text-[11px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-100 px-2 py-0.5 rounded shadow-sm">
-                                    {item.cfop}
-                                  </span>
+                                  <div className="flex items-center justify-center gap-1.5">
+                                    <span className="text-[11px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-100 px-2 py-0.5 rounded shadow-sm">
+                                      {item.cfop}
+                                    </span>
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        setCfopModalData({
+                                          cfop: item.cfop,
+                                          ...getCFOPInfo(item.cfop),
+                                        });
+                                      }}
+                                      className="text-emerald-500 hover:text-emerald-700 transition-colors p-1"
+                                      title="Ver detalhes do CFOP"
+                                    >
+                                      <Info size={14} />
+                                    </button>
+                                  </div>
                                 ) : (
                                   <span className="text-gray-400 font-mono text-sm">
                                     -
                                   </span>
                                 )}
                               </td>
-                              {/* NCM SEPARADO E COM TOOLTIP INTELIGENTE */}
                               <td className="px-4 py-3 text-center">
                                 <div className="flex items-center justify-center gap-1.5 text-sm font-mono text-gray-500">
                                   {item.ncm}
-                                  <div className="group relative inline-block">
-                                    <HelpCircle
-                                      size={14}
-                                      className="text-blue-400 cursor-pointer hover:text-blue-600"
-                                    />
-                                    <div className="hidden group-hover:block absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-72 bg-gray-900 text-white text-xs p-3 rounded-lg shadow-xl z-50 font-sans normal-case text-left">
-                                      <div className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-3 h-3 bg-gray-900 rotate-45" />
-                                      <p className="font-black text-emerald-400 mb-1 border-b border-gray-700 pb-1">
-                                        Análise do NCM
-                                      </p>
-                                      <p className="font-bold text-gray-300 mt-1">
-                                        Capítulo {cap}:
-                                      </p>
-                                      <p className="mb-2 leading-tight">
-                                        {descCap}
-                                      </p>
-                                      <p className="font-bold text-blue-300">
-                                        Posição {pos}:
-                                      </p>
-                                      <p className="leading-tight">{descPos}</p>
-                                    </div>
-                                  </div>
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setNcmModalData({
+                                        ncm: item.ncm,
+                                        cap,
+                                        pos,
+                                        descCap,
+                                        descPos,
+                                      });
+                                    }}
+                                    className="text-emerald-500 hover:text-emerald-700 transition-colors p-1"
+                                    title="Ver detalhes do NCM"
+                                  >
+                                    <Info size={14} />
+                                  </button>
                                 </div>
                               </td>
                               <td className="px-4 py-3 text-center">
@@ -1219,8 +1399,8 @@ export function LivroCaixa() {
                                 >
                                   <Edit3 size={12} />{" "}
                                   {item.isDedutivel
-                                    ? "Despesa Dedutível"
-                                    : "Uso Pessoal (Não Dedutível)"}
+                                    ? "Lançar no Livro"
+                                    : "Não Lançar no Livro"}
                                 </button>
                               </td>
                               <td className="px-4 py-3 text-sm font-bold text-gray-700 text-right font-mono">
@@ -1251,7 +1431,6 @@ export function LivroCaixa() {
                         valores.
                       </p>
                     </div>
-                    {/* BOTÕES DE RESET E ADICIONAR PARCELA */}
                     <div className="flex items-center gap-2">
                       <button
                         onClick={() =>
@@ -1336,7 +1515,6 @@ export function LivroCaixa() {
                                     className="px-3 py-1.5 border border-gray-300 rounded-lg outline-none text-sm font-bold focus:border-blue-400 text-blue-800 bg-blue-50/50 transition-colors"
                                   />
                                 </td>
-                                {/* MÁSCARA FINANCEIRA INTELIGENTE DO VALOR DA PARCELA */}
                                 <td className="px-4 py-3 text-right">
                                   <input
                                     type="text"
@@ -1401,25 +1579,179 @@ export function LivroCaixa() {
               )}
             </div>
 
-            <div className="p-6 border-t border-gray-100 bg-gray-50 flex justify-between items-center">
+            <div className="p-6 border-t border-gray-100 bg-gray-50 flex flex-col md:flex-row justify-between items-center gap-4">
+              <div className="flex gap-3 w-full md:w-auto">
+                <button
+                  onClick={salvarAlteracoesNota}
+                  disabled={isLoading}
+                  className="flex-1 md:flex-none flex items-center justify-center gap-2 px-6 py-2.5 bg-agro-secondary hover:bg-agro-primary text-white font-bold rounded-xl shadow-sm transition-all text-sm"
+                >
+                  {isLoading ? (
+                    <Loader2 size={18} className="animate-spin" />
+                  ) : (
+                    <Save size={18} />
+                  )}
+                  Salvar Toda a Nota
+                </button>
+                <button
+                  onClick={() => excluirNota(selectedNotaModal.id)}
+                  disabled={isLoading}
+                  className="flex-1 md:flex-none flex items-center justify-center gap-2 px-6 py-2.5 bg-rose-50 hover:bg-rose-100 text-rose-700 font-bold border border-rose-200 rounded-xl shadow-sm transition-all text-sm"
+                >
+                  <Trash2 size={18} /> Excluir
+                </button>
+              </div>
+              <div className="flex items-center gap-6 w-full md:w-auto justify-between md:justify-end">
+                <div className="hidden sm:block border-r border-gray-200 pr-6 text-right">
+                  <p className="text-xs font-bold text-gray-500 mb-1 uppercase tracking-wider">
+                    Detalhamento (LCDPR)
+                  </p>
+                  <div className="flex items-center gap-2 justify-end mb-1">
+                    <span
+                      className="text-[10px] bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded font-bold"
+                      title="Peso Dedutível"
+                    >
+                      {percDedutivelModal.toFixed(1)}%
+                    </span>
+                    <span
+                      className="text-sm font-bold text-emerald-600 font-mono"
+                      title="Total Lançado no Livro"
+                    >
+                      {formatBRL(totalDedutivelModal)}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2 justify-end">
+                    <span
+                      className="text-[10px] bg-rose-100 text-rose-700 px-1.5 py-0.5 rounded font-bold"
+                      title="Peso Não Dedutível"
+                    >
+                      {percNaoDedutivelModal.toFixed(1)}%
+                    </span>
+                    <span
+                      className="text-xs font-bold text-rose-500 font-mono"
+                      title="Uso Pessoal (Não Lançado)"
+                    >
+                      {formatBRL(totalNaoDedutivelModal)}
+                    </span>
+                  </div>
+                </div>
+                <div className="text-right">
+                  <p className="text-sm text-gray-500">Valor Total da Nota</p>
+                  <p className="text-2xl font-bold text-gray-800 font-mono">
+                    {formatBRL(selectedNotaModal.valorTotal)}
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MINI-MODAL DO DETALHAMENTO DO NCM */}
+      {ncmModalData && (
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-[110] flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm overflow-hidden flex flex-col animate-in zoom-in-95 duration-200">
+            <div className="p-5 border-b border-gray-100 flex items-center justify-between bg-gray-50">
+              <h2 className="font-bold text-gray-800 flex items-center gap-2">
+                <Info size={18} className="text-emerald-600" /> Detalhamento do
+                NCM
+              </h2>
               <button
-                onClick={salvarAlteracoesNota}
-                disabled={isLoading}
-                className="flex items-center gap-2 px-8 py-3 bg-agro-secondary hover:bg-agro-primary text-white font-bold rounded-xl shadow-sm transition-all text-sm"
+                onClick={() => setNcmModalData(null)}
+                className="p-1.5 hover:bg-gray-200 rounded-lg text-gray-400 transition-colors"
               >
-                {isLoading ? (
-                  <Loader2 size={18} className="animate-spin" />
-                ) : (
-                  <Save size={18} />
-                )}
-                Salvar Toda a Nota (Itens e Parcelas)
+                <X size={20} />
               </button>
-              <div className="text-right">
-                <p className="text-sm text-gray-500">Valor Total da Nota</p>
-                <p className="text-2xl font-bold text-gray-800 font-mono">
-                  {formatBRL(selectedNotaModal.valorTotal)}
+            </div>
+
+            <div className="p-6 space-y-4">
+              <div className="bg-emerald-50 text-emerald-800 font-mono font-bold px-3 py-2 rounded-lg text-center text-lg border border-emerald-100 shadow-sm">
+                {ncmModalData.ncm}
+              </div>
+
+              <div className="space-y-1.5">
+                <p className="font-bold text-gray-400 uppercase tracking-wider text-[10px]">
+                  Capítulo {ncmModalData.cap}
+                </p>
+                <p className="font-semibold text-gray-800 text-sm leading-relaxed">
+                  {ncmModalData.descCap}
                 </p>
               </div>
+
+              <div className="w-full h-px bg-gray-100" />
+
+              <div className="space-y-1.5">
+                <p className="font-bold text-gray-400 uppercase tracking-wider text-[10px]">
+                  Posição {ncmModalData.pos}
+                </p>
+                <p className="font-semibold text-gray-800 text-sm leading-relaxed">
+                  {ncmModalData.descPos}
+                </p>
+              </div>
+            </div>
+
+            <div className="p-5 border-t border-gray-100 bg-gray-50 flex justify-end">
+              <button
+                onClick={() => setNcmModalData(null)}
+                className="px-6 py-2.5 text-sm font-bold text-white bg-emerald-600 hover:bg-emerald-500 rounded-xl shadow-sm transition-colors"
+              >
+                Entendi
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MINI-MODAL DO DETALHAMENTO DO CFOP */}
+      {cfopModalData && (
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-[110] flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm overflow-hidden flex flex-col animate-in zoom-in-95 duration-200">
+            <div className="p-5 border-b border-gray-100 flex items-center justify-between bg-gray-50">
+              <h2 className="font-bold text-gray-800 flex items-center gap-2">
+                <Info size={18} className="text-blue-600" /> Regra do CFOP
+              </h2>
+              <button
+                onClick={() => setCfopModalData(null)}
+                className="p-1.5 hover:bg-gray-200 rounded-lg text-gray-400 transition-colors"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-4">
+              <div
+                className={`font-mono font-bold px-3 py-2 rounded-lg text-center text-lg border shadow-sm ${cfopModalData.cor}`}
+              >
+                {cfopModalData.cfop}
+              </div>
+
+              <div className="space-y-1.5 text-center">
+                <span
+                  className={`inline-block px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider border ${cfopModalData.cor}`}
+                >
+                  {cfopModalData.tipo}
+                </span>
+              </div>
+
+              <div className="w-full h-px bg-gray-100" />
+
+              <div className="space-y-1.5">
+                <p className="font-bold text-gray-400 uppercase tracking-wider text-[10px]">
+                  Análise da Operação
+                </p>
+                <p className="font-semibold text-gray-800 text-sm leading-relaxed">
+                  {cfopModalData.descricao}
+                </p>
+              </div>
+            </div>
+
+            <div className="p-5 border-t border-gray-100 bg-gray-50 flex justify-end">
+              <button
+                onClick={() => setCfopModalData(null)}
+                className="px-6 py-2.5 text-sm font-bold text-white bg-slate-800 hover:bg-slate-900 rounded-xl shadow-sm transition-colors"
+              >
+                Entendi
+              </button>
             </div>
           </div>
         </div>

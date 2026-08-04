@@ -17,16 +17,21 @@ import {
   CalendarDays,
   ChevronDown,
   Info,
+  Plus,
+  ListOrdered,
 } from "lucide-react";
 import { useProducer } from "../context/ProducerContext";
+import { NCM_CAPITULOS, NCM_POSICOES } from "../utils/dicionarioNcm";
 
 type ItemNota = {
   id: number;
   descricao: string;
   ncm: string;
+  cfop?: string;
   valor: number;
   isDedutivel: boolean;
 };
+
 type NotaFiscal = {
   id: number;
   numero: string;
@@ -36,6 +41,7 @@ type NotaFiscal = {
   empresaEnvolvida: string;
   chaveAcessoReferencia?: string;
   itens: ItemNota[];
+  parcelas?: any[];
 };
 
 export function NotasFiscais() {
@@ -91,6 +97,18 @@ export function NotasFiscais() {
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadMessage, setUploadMessage] = useState({ text: "", type: "" });
+
+  const [activeTabModal, setActiveTabModal] = useState<"itens" | "parcelas">(
+    "itens",
+  );
+
+  const [ncmModalData, setNcmModalData] = useState<{
+    ncm: string;
+    cap: string;
+    pos: string;
+    descCap: string;
+    descPos: string;
+  } | null>(null);
 
   const obterParametrosDeData = useCallback(
     (periodo: string | number) => {
@@ -231,10 +249,8 @@ export function NotasFiscais() {
         );
 
         if (response.ok) {
-          // LÊ O TEXTO QUE O JAVA ENVIOU
           const msgBackend = await response.text();
 
-          // Extrai os números da mensagem do Java para somar os lotes
           const matchImportadas = msgBackend.match(/(\d+)\snotas\simportadas/);
           const matchIgnoradas = msgBackend.match(/(\d+)\signoradas/);
           const matchFalhas = msgBackend.match(/(\d+)\sfalharam/);
@@ -257,7 +273,6 @@ export function NotasFiscais() {
       });
     }
 
-    // Constrói o relatório final baseado na leitura do Java
     let msgFinal = `Concluído: ${totalImportadas} notas importadas.`;
     if (totalIgnoradas > 0)
       msgFinal += ` ${totalIgnoradas} ignoradas (já existiam).`;
@@ -273,7 +288,6 @@ export function NotasFiscais() {
             : "error",
     });
 
-    // Tempo ajustado para 3.5 segundos
     setTimeout(() => {
       setIsImportModalOpen(false);
       setSelectedFiles([]);
@@ -294,6 +308,32 @@ export function NotasFiscais() {
     }
   };
 
+  const abrirNotaVinculada = async (notaId?: number, preserveTab = false) => {
+    if (!notaId) return;
+    setIsLoading(true);
+    try {
+      const token = localStorage.getItem("@AgroPops:token");
+      const res = await fetch(`${baseUrl}/notas/buscar/${notaId}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        // CORREÇÃO CIRÚRGICA DE ORDENAÇÃO DE PARCELAS
+        if (data.parcelas) {
+          data.parcelas.sort((a: any, b: any) =>
+            String(a.numeroParcela).localeCompare(String(b.numeroParcela)),
+          );
+        }
+        setSelectedNotaModal(data);
+        if (!preserveTab) setActiveTabModal("itens");
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const toggleItemDedutibilidade = (itemId: number) => {
     if (selectedNotaModal) {
       const updatedNota = {
@@ -308,26 +348,79 @@ export function NotasFiscais() {
     }
   };
 
-  const salvarAlteracoesItens = async () => {
+  const handleAdicionarParcela = () => {
     if (!selectedNotaModal) return;
+    const novaParcela = {
+      id: null,
+      numeroParcela: String(
+        (selectedNotaModal.parcelas?.length || 0) + 1,
+      ).padStart(3, "0"),
+      dataVencimento: selectedNotaModal.dataEmissao,
+      valor: 0,
+    };
+    setSelectedNotaModal({
+      ...selectedNotaModal,
+      parcelas: [...(selectedNotaModal.parcelas || []), novaParcela],
+    });
+  };
+
+  const handleRemoverParcela = (index: number) => {
+    if (!selectedNotaModal || !selectedNotaModal.parcelas) return;
+    const novasParcelas = [...selectedNotaModal.parcelas];
+    novasParcelas.splice(index, 1);
+    novasParcelas.forEach(
+      (p, i) => (p.numeroParcela = String(i + 1).padStart(3, "0")),
+    );
+    setSelectedNotaModal({ ...selectedNotaModal, parcelas: novasParcelas });
+  };
+
+  const salvarAlteracoesNota = async () => {
+    if (!selectedNotaModal) return;
+
+    const somaParcelas =
+      selectedNotaModal.parcelas?.reduce(
+        (acc: number, p: any) => acc + Number(p.valor),
+        0,
+      ) || 0;
+
+    if (selectedNotaModal.parcelas && selectedNotaModal.parcelas.length > 0) {
+      if (Math.abs(somaParcelas - selectedNotaModal.valorTotal) > 0.1) {
+        alert(
+          `Atenção: A soma das parcelas (${formatBRL(somaParcelas)}) não confere com o total da nota (${formatBRL(selectedNotaModal.valorTotal)}). Ajuste os valores antes de salvar.`,
+        );
+        return;
+      }
+    }
+
     setIsLoading(true);
     try {
       const token = localStorage.getItem("@AgroPops:token");
-      const response = await fetch(
-        `${baseUrl}/notas/atualizar-itens/${selectedNotaModal.id}`,
-        {
-          method: "PUT",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
-          },
-          body: JSON.stringify(selectedNotaModal.itens),
+
+      await fetch(`${baseUrl}/notas/atualizar-itens/${selectedNotaModal.id}`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
         },
-      );
-      if (response.ok) {
-        setSelectedNotaModal(null);
-        buscarNotas();
+        body: JSON.stringify(selectedNotaModal.itens),
+      });
+
+      if (selectedNotaModal.parcelas && selectedNotaModal.parcelas.length > 0) {
+        await fetch(
+          `${baseUrl}/notas/atualizar-parcelas/${selectedNotaModal.id}`,
+          {
+            method: "PUT",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${token}`,
+            },
+            body: JSON.stringify(selectedNotaModal.parcelas),
+          },
+        );
       }
+
+      setSelectedNotaModal(null);
+      buscarNotas();
     } catch (error) {
       console.error(error);
     } finally {
@@ -411,6 +504,25 @@ export function NotasFiscais() {
     const [ano, mes, dia] = dataString.split("-");
     return `${dia}/${mes}/${ano}`;
   };
+
+  // CÁLCULOS DO RODAPÉ (LCDPR) - Evita chamar dentro do return do modal
+  const totalDedutivelModal =
+    selectedNotaModal?.itens?.reduce(
+      (acc: number, item: any) =>
+        acc + (item.isDedutivel ? Number(item.valor) : 0),
+      0,
+    ) || 0;
+  const totalNaoDedutivelModal =
+    selectedNotaModal?.itens?.reduce(
+      (acc: number, item: any) =>
+        acc + (!item.isDedutivel ? Number(item.valor) : 0),
+      0,
+    ) || 0;
+  const basePercModal = totalDedutivelModal + totalNaoDedutivelModal;
+  const percDedutivelModal =
+    basePercModal > 0 ? (totalDedutivelModal / basePercModal) * 100 : 0;
+  const percNaoDedutivelModal =
+    basePercModal > 0 ? (totalNaoDedutivelModal / basePercModal) * 100 : 0;
 
   return (
     <div className="space-y-6 pb-10">
@@ -570,13 +682,13 @@ export function NotasFiscais() {
               onClick={() => setFiltroDedutibilidade("dedutivel")}
               className={`px-3 py-1.5 text-xs font-bold rounded-full border transition-all ${filtroDedutibilidade === "dedutivel" ? "bg-emerald-100 text-emerald-700 border-emerald-200" : "bg-white text-gray-500 border-gray-200 hover:bg-gray-50"}`}
             >
-              Possui Abate Imposto
+              Lançados no Livro
             </button>
             <button
               onClick={() => setFiltroDedutibilidade("nao_dedutivel")}
               className={`px-3 py-1.5 text-xs font-bold rounded-full border transition-all ${filtroDedutibilidade === "nao_dedutivel" ? "bg-rose-100 text-rose-700 border-rose-200" : "bg-white text-gray-500 border-gray-200 hover:bg-gray-50"}`}
             >
-              Possui Despesa Pessoal
+              Não Lançados
             </button>
           </div>
         )}
@@ -611,7 +723,7 @@ export function NotasFiscais() {
                 return (
                   <tr
                     key={nota.id}
-                    onClick={() => setSelectedNotaModal(nota)}
+                    onClick={() => abrirNotaVinculada(nota.id)}
                     className="hover:bg-blue-50/50 transition-colors cursor-pointer"
                   >
                     <td className="px-6 py-4">
@@ -679,7 +791,7 @@ export function NotasFiscais() {
 
       {selectedNotaModal && (
         <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-5xl overflow-hidden flex flex-col max-h-[90vh]">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-6xl overflow-hidden flex flex-col max-h-[90vh]">
             <div className="p-6 border-b border-gray-100 flex items-center justify-between bg-gray-50">
               <div className="flex items-center gap-4">
                 <div>
@@ -688,7 +800,7 @@ export function NotasFiscais() {
                     {selectedNotaModal.numero}
                   </h2>
                   <p className="text-sm text-gray-500 mt-1">
-                    {selectedNotaModal.empresaEnvolvida} •{" "}
+                    {selectedNotaModal.empresaEnvolvida} • Emissão:{" "}
                     {formatarData(selectedNotaModal.dataEmissao)}
                   </p>
                   {/* ALERTA DE VÍNCULO DE DEVOLUÇÃO */}
@@ -719,342 +831,431 @@ export function NotasFiscais() {
               </button>
             </div>
 
-            <div className="p-6 overflow-y-auto bg-white">
-              <h3 className="text-sm font-bold text-gray-400 uppercase tracking-wider mb-4">
-                Itens da Operação ({selectedNotaModal.itens.length})
-              </h3>
-              <div className="border border-gray-100 rounded-xl overflow-hidden">
-                <table className="w-full text-left border-collapse">
-                  <thead>
-                    <tr className="bg-gray-50 border-b border-gray-100 text-xs text-gray-500 uppercase">
-                      <th className="px-4 py-3 font-medium">
-                        Produto / Descrição
-                      </th>
-                      <th className="px-4 py-3 font-medium">NCM</th>
-                      <th className="px-4 py-3 font-medium">
-                        Dedutibilidade (LCDPR)
-                      </th>
-                      <th className="px-4 py-3 font-medium text-right">
-                        Valor Unitário
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-100">
-                    {selectedNotaModal.itens.map((item) => {
-                      const isDevolucao =
-                        item.descricao.includes("[DEVOLUÇÃO]");
-                      const descricaoLimpa = item.descricao
-                        .replace("[DEVOLUÇÃO]", "")
-                        .trim();
-                      const valorAbsoluto = Math.abs(item.valor);
-                      return (
-                        <tr key={item.id} className="hover:bg-gray-50/50">
-                          <td className="px-4 py-3 text-sm font-medium text-gray-800">
-                            {isDevolucao ? (
-                              <span
-                                className="text-sky-600 flex items-center gap-1.5 font-bold"
-                                title="Item de Devolução/Estorno"
-                              >
-                                <RotateCcw size={14} strokeWidth={3} />{" "}
-                                {descricaoLimpa}
-                              </span>
-                            ) : (
-                              item.descricao
-                            )}
-                          </td>
-                          <td className="px-4 py-3 text-sm text-gray-500 font-mono">
-                            {item.ncm}
-                          </td>
-                          <td className="px-4 py-3">
-                            <button
-                              onClick={() => toggleItemDedutibilidade(item.id)}
-                              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all border ${item.isDedutivel ? "bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100" : "bg-rose-50 text-rose-700 border-rose-200 hover:bg-rose-100"}`}
-                            >
-                              <Edit3 size={12} />{" "}
-                              {item.isDedutivel
-                                ? "Despesa Dedutível"
-                                : "Uso Pessoal (Não Dedutível)"}
-                            </button>
-                          </td>
-                          <td className="px-4 py-3 text-sm font-bold text-gray-700 text-right">
-                            {isDevolucao ? (
-                              <span className="text-sky-600">
-                                - {formatBRL(valorAbsoluto)}
-                              </span>
-                            ) : (
-                              formatBRL(item.valor)
-                            )}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
+            <div className="flex px-6 bg-gray-50 border-b border-gray-100 pt-2">
+              <button
+                onClick={() => setActiveTabModal("itens")}
+                className={`flex items-center gap-2 pb-3 px-5 text-sm font-bold border-b-2 transition-colors ${
+                  activeTabModal === "itens"
+                    ? "border-agro-secondary text-agro-secondary bg-white rounded-t-xl shadow-[0_-4px_6px_-4px_rgba(0,0,0,0.05)]"
+                    : "border-transparent text-gray-500 hover:text-gray-700"
+                }`}
+              >
+                <ListOrdered size={16} /> Produtos e Classificação
+              </button>
+              <button
+                onClick={() => setActiveTabModal("parcelas")}
+                className={`flex items-center gap-2 pb-3 px-5 text-sm font-bold border-b-2 transition-colors ${
+                  activeTabModal === "parcelas"
+                    ? "border-blue-500 text-blue-600 bg-white rounded-t-xl shadow-[0_-4px_6px_-4px_rgba(0,0,0,0.05)]"
+                    : "border-transparent text-gray-500 hover:text-gray-700"
+                }`}
+              >
+                <CalendarDays size={16} /> Financeiro e Parcelamento
+              </button>
             </div>
-            <div className="p-6 border-t border-gray-100 bg-gray-50 flex justify-between items-center">
-              <div className="flex gap-3">
+
+            <div className="p-6 overflow-y-auto bg-white flex-1">
+              {activeTabModal === "itens" ? (
+                <>
+                  <h3 className="text-sm font-bold text-gray-400 uppercase tracking-wider mb-4">
+                    Itens NFE ({selectedNotaModal.itens.length})
+                  </h3>
+                  <div className="border border-gray-100 rounded-xl overflow-visible">
+                    <table className="w-full text-left border-collapse">
+                      <thead>
+                        <tr className="bg-gray-50 border-b border-gray-100 text-xs text-gray-500 uppercase">
+                          <th className="px-4 py-3 font-medium">
+                            Produto / Descrição
+                          </th>
+                          <th className="px-4 py-3 font-medium text-center">
+                            CFOP
+                          </th>
+                          <th className="px-4 py-3 font-medium text-center">
+                            NCM
+                          </th>
+                          <th className="px-4 py-3 font-medium text-center">
+                            Livro Caixa
+                          </th>
+                          <th className="px-4 py-3 font-medium text-right">
+                            Valor Unitário
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100">
+                        {selectedNotaModal.itens.map((item) => {
+                          const isDevolucao =
+                            item.descricao.includes("[DEVOLUÇÃO]");
+                          const descricaoLimpa = item.descricao
+                            .replace("[DEVOLUÇÃO]", "")
+                            .trim();
+                          const valorAbsoluto = Math.abs(item.valor);
+
+                          const cap = item.ncm
+                            ? item.ncm.substring(0, 2)
+                            : "00";
+                          const pos = item.ncm
+                            ? item.ncm.substring(0, 4)
+                            : "0000";
+                          const descCap =
+                            NCM_CAPITULOS[cap] || "Capítulo não mapeado";
+                          const descPos =
+                            NCM_POSICOES[pos] || "Posição não mapeada";
+
+                          return (
+                            <tr key={item.id} className="hover:bg-gray-50/50">
+                              <td className="px-4 py-3 text-sm font-medium text-gray-800">
+                                {isDevolucao ? (
+                                  <span
+                                    className="text-sky-600 flex items-center gap-1.5 font-bold"
+                                    title="Item de Devolução/Estorno"
+                                  >
+                                    <RotateCcw size={14} strokeWidth={3} />{" "}
+                                    {descricaoLimpa}
+                                  </span>
+                                ) : (
+                                  item.descricao
+                                )}
+                              </td>
+                              <td className="px-4 py-3 text-center">
+                                {item.cfop ? (
+                                  <span className="text-[11px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-100 px-2 py-0.5 rounded shadow-sm">
+                                    {item.cfop}
+                                  </span>
+                                ) : (
+                                  <span className="text-gray-400 font-mono text-sm">
+                                    -
+                                  </span>
+                                )}
+                              </td>
+                              <td className="px-4 py-3 text-center">
+                                <div className="flex items-center justify-center gap-1.5 text-sm font-mono text-gray-500">
+                                  {item.ncm}
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setNcmModalData({
+                                        ncm: item.ncm,
+                                        cap,
+                                        pos,
+                                        descCap,
+                                        descPos,
+                                      });
+                                    }}
+                                    className="text-emerald-500 hover:text-emerald-700 transition-colors p-1"
+                                    title="Ver detalhes do NCM"
+                                  >
+                                    <Info size={14} />
+                                  </button>
+                                </div>
+                              </td>
+                              <td className="px-4 py-3 text-center">
+                                <button
+                                  onClick={() =>
+                                    toggleItemDedutibilidade(item.id)
+                                  }
+                                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all border ${item.isDedutivel ? "bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100" : "bg-rose-50 text-rose-700 border-rose-200 hover:bg-rose-100"}`}
+                                >
+                                  <Edit3 size={12} />{" "}
+                                  {item.isDedutivel
+                                    ? "Lançar no Livro"
+                                    : "Não Lançar no Livro"}
+                                </button>
+                              </td>
+                              <td className="px-4 py-3 text-sm font-bold text-gray-700 text-right font-mono">
+                                {isDevolucao ? (
+                                  <span className="text-sky-600">
+                                    - {formatBRL(valorAbsoluto)}
+                                  </span>
+                                ) : (
+                                  formatBRL(item.valor)
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-4">
+                    <div>
+                      <h3 className="text-sm font-bold text-gray-400 uppercase tracking-wider">
+                        Agenda de Pagamentos
+                      </h3>
+                      <p className="text-xs text-gray-500 mt-0.5">
+                        O Livro Caixa será montado com base nestas datas e
+                        valores.
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() =>
+                          abrirNotaVinculada(selectedNotaModal.id, true)
+                        }
+                        className="flex items-center gap-2 bg-gray-100 text-gray-600 border border-gray-200 hover:bg-gray-200 px-3 py-2 rounded-xl text-sm font-bold transition-colors"
+                        title="Desfazer alterações e voltar ao estado original da nota"
+                      >
+                        <RotateCcw size={16} /> Restaurar Original
+                      </button>
+                      <button
+                        onClick={handleAdicionarParcela}
+                        className="flex items-center gap-2 bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100 px-4 py-2 rounded-xl text-sm font-bold transition-colors"
+                      >
+                        <Plus size={16} /> Adicionar Parcela Manual
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="border border-gray-100 rounded-xl overflow-hidden">
+                    <table className="w-full text-left border-collapse">
+                      <thead>
+                        <tr className="bg-gray-50 border-b border-gray-100 text-xs text-gray-500 uppercase">
+                          <th className="px-4 py-3 font-medium">Nº Parcela</th>
+                          <th className="px-4 py-3 font-medium">
+                            Data de Vencimento / Pagto
+                          </th>
+                          <th className="px-4 py-3 font-medium text-right">
+                            Valor da Parcela
+                          </th>
+                          <th className="px-4 py-3 font-medium text-center">
+                            Ação
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100">
+                        {!selectedNotaModal.parcelas ||
+                        selectedNotaModal.parcelas.length === 0 ? (
+                          <tr>
+                            <td
+                              colSpan={4}
+                              className="p-8 text-center text-gray-400 text-sm"
+                            >
+                              Nenhuma parcela localizada. Adicione manualmente
+                              se houver.
+                            </td>
+                          </tr>
+                        ) : (
+                          selectedNotaModal.parcelas.map(
+                            (parcela: any, index: number) => (
+                              <tr
+                                key={parcela.id || index}
+                                className="hover:bg-blue-50/20 transition-colors"
+                              >
+                                <td className="px-4 py-3 text-sm font-bold text-gray-700 font-mono">
+                                  <input
+                                    type="text"
+                                    value={parcela.numeroParcela}
+                                    onChange={(e) => {
+                                      const newVal = e.target.value;
+                                      setSelectedNotaModal((prev: any) => {
+                                        const p = [...prev.parcelas];
+                                        p[index].numeroParcela = newVal;
+                                        return { ...prev, parcelas: p };
+                                      });
+                                    }}
+                                    className="w-16 px-2 py-1 border border-gray-200 rounded text-center outline-none focus:border-blue-400"
+                                  />
+                                </td>
+                                <td className="px-4 py-3">
+                                  <input
+                                    type="date"
+                                    value={parcela.dataVencimento}
+                                    onChange={(e) => {
+                                      const newVal = e.target.value;
+                                      setSelectedNotaModal((prev: any) => {
+                                        const p = [...prev.parcelas];
+                                        p[index].dataVencimento = newVal;
+                                        return { ...prev, parcelas: p };
+                                      });
+                                    }}
+                                    className="px-3 py-1.5 border border-gray-300 rounded-lg outline-none text-sm font-bold focus:border-blue-400 text-blue-800 bg-blue-50/50 transition-colors"
+                                  />
+                                </td>
+                                <td className="px-4 py-3 text-right">
+                                  <input
+                                    type="text"
+                                    value={Number(
+                                      parcela.valor || 0,
+                                    ).toLocaleString("pt-BR", {
+                                      minimumFractionDigits: 2,
+                                      maximumFractionDigits: 2,
+                                    })}
+                                    onChange={(e) => {
+                                      const raw = e.target.value.replace(
+                                        /\D/g,
+                                        "",
+                                      );
+                                      const newVal = parseFloat(raw) / 100 || 0;
+                                      setSelectedNotaModal((prev: any) => {
+                                        const p = [...prev.parcelas];
+                                        p[index].valor = newVal;
+                                        return { ...prev, parcelas: p };
+                                      });
+                                    }}
+                                    className="w-36 px-3 py-1.5 border border-gray-300 rounded-lg outline-none text-sm font-mono font-bold text-gray-800 text-right focus:border-blue-400 bg-white shadow-sm"
+                                  />
+                                </td>
+                                <td className="px-4 py-3 text-center">
+                                  <button
+                                    onClick={() => handleRemoverParcela(index)}
+                                    className="text-gray-400 hover:text-rose-500 p-1.5 rounded-lg hover:bg-rose-50 transition-colors"
+                                  >
+                                    <Trash2 size={16} />
+                                  </button>
+                                </td>
+                              </tr>
+                            ),
+                          )
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  {selectedNotaModal.parcelas &&
+                    selectedNotaModal.parcelas.length > 0 && (
+                      <div
+                        className={`mt-4 p-4 rounded-xl border ${Math.abs(selectedNotaModal.parcelas.reduce((a: any, p: any) => a + Number(p.valor), 0) - selectedNotaModal.valorTotal) > 0.1 ? "bg-amber-50 border-amber-200" : "bg-gray-50 border-gray-200"} flex justify-between items-center`}
+                      >
+                        <p className="text-sm text-gray-600">
+                          Soma das Parcelas:
+                        </p>
+                        <p
+                          className={`text-xl font-black font-mono ${Math.abs(selectedNotaModal.parcelas.reduce((a: any, p: any) => a + Number(p.valor), 0) - selectedNotaModal.valorTotal) > 0.1 ? "text-amber-600" : "text-emerald-600"}`}
+                        >
+                          {formatBRL(
+                            selectedNotaModal.parcelas.reduce(
+                              (a: any, p: any) => a + Number(p.valor),
+                              0,
+                            ),
+                          )}
+                        </p>
+                      </div>
+                    )}
+                </>
+              )}
+            </div>
+
+            <div className="p-6 border-t border-gray-100 bg-gray-50 flex flex-col md:flex-row justify-between items-center gap-4">
+              <div className="flex gap-3 w-full md:w-auto">
                 <button
-                  onClick={salvarAlteracoesItens}
+                  onClick={salvarAlteracoesNota}
                   disabled={isLoading}
-                  className="flex items-center gap-2 px-6 py-2.5 bg-agro-secondary hover:bg-agro-primary text-white font-bold rounded-xl shadow-sm transition-all"
+                  className="flex-1 md:flex-none flex items-center justify-center gap-2 px-6 py-2.5 bg-agro-secondary hover:bg-agro-primary text-white font-bold rounded-xl shadow-sm transition-all text-sm"
                 >
                   {isLoading ? (
                     <Loader2 size={18} className="animate-spin" />
                   ) : (
                     <Save size={18} />
                   )}{" "}
-                  Salvar Alterações
+                  Salvar Toda a Nota
                 </button>
                 <button
                   onClick={() => excluirNota(selectedNotaModal.id)}
                   disabled={isLoading}
-                  className="flex items-center gap-2 px-6 py-2.5 bg-rose-50 hover:bg-rose-100 text-rose-700 font-bold border border-rose-200 rounded-xl shadow-sm transition-all"
+                  className="flex-1 md:flex-none flex items-center justify-center gap-2 px-6 py-2.5 bg-rose-50 hover:bg-rose-100 text-rose-700 font-bold border border-rose-200 rounded-xl shadow-sm transition-all text-sm"
                 >
-                  <Trash2 size={18} /> Excluir Nota
+                  <Trash2 size={18} /> Excluir
                 </button>
               </div>
-              <div className="text-right">
-                <p className="text-sm text-gray-500">Valor Total da Nota</p>
-                <p className="text-2xl font-bold text-gray-800">
-                  {formatBRL(selectedNotaModal.valorTotal)}
-                </p>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
 
-      {/* MODAL DE APAGAR NOTAS */}
-      {isDeleteModalOpen && (
-        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden flex flex-col">
-            <div className="p-6 border-b border-gray-100 flex items-center justify-between">
-              <h2 className="text-xl font-bold text-rose-600 flex items-center gap-2">
-                <Trash2 /> Apagar Notas Selecionadas
-              </h2>
-              <button
-                onClick={() => setIsDeleteModalOpen(false)}
-                className="p-2 hover:bg-gray-100 rounded-lg text-gray-400"
-              >
-                <X size={20} />
-              </button>
-            </div>
-            <div className="p-6 space-y-4">
-              <p className="text-sm text-gray-600">
-                Atenção: Você está prestes a excluir **todas as notas** do
-                período selecionado atualmente: <strong>{activePeriod}</strong>.
-              </p>
-              <div className="bg-rose-50 p-3 rounded-lg border border-rose-100 text-xs text-rose-700 font-medium">
-                ⚠️ Aviso: A exclusão abrange todas as notas importadas dentro do
-                período selecionado. Esta ação não pode ser desfeita.
-              </div>
-            </div>
-            <div className="p-6 border-t border-gray-100 bg-gray-50 flex justify-end gap-3">
-              <button
-                onClick={() => setIsDeleteModalOpen(false)}
-                disabled={isLoading}
-                className="px-5 py-2.5 text-sm font-medium text-gray-600 hover:bg-gray-200 rounded-xl"
-              >
-                Cancelar
-              </button>
-              <button
-                onClick={confirmarExclusaoEmMassa}
-                disabled={isLoading}
-                className="px-5 py-2.5 text-sm font-medium text-white bg-rose-600 hover:bg-rose-500 rounded-xl flex items-center gap-2"
-              >
-                {isLoading ? (
-                  <>
-                    <Loader2 size={16} className="animate-spin" /> Apagando...
-                  </>
-                ) : (
-                  "Confirmar Exclusão"
-                )}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* MODAL DE IMPORTAÇÃO (XML) */}
-      {isImportModalOpen && (
-        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg overflow-hidden flex flex-col max-h-[90vh]">
-            <div className="p-6 border-b border-gray-100 flex items-center justify-between">
-              <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2">
-                <UploadCloud className="text-emerald-600" /> Importar XML
-              </h2>
-              <button
-                onClick={() => {
-                  setIsImportModalOpen(false);
-                  setSelectedFiles([]);
-                }}
-                className="p-2 hover:bg-gray-100 rounded-lg text-gray-400"
-              >
-                <X size={20} />
-              </button>
-            </div>
-
-            {/* AVISO DE DESTINO */}
-            <div className="bg-slate-50 border border-slate-200 p-4 mx-6 mt-6 rounded-xl flex items-start gap-3 shadow-sm">
-              <div className="text-slate-400 mt-0.5">
-                <Info size={18} />
-              </div>
-              <div>
-                <p className="text-sm text-slate-700 font-bold">
-                  Destino Automático / Manual:
-                </p>
-                <p className="text-xs text-slate-500 mt-1 leading-relaxed">
-                  O sistema tentará ler a <b>Inscrição Estadual</b> do XML. Se
-                  não encontrar, a nota será salva em: <br />
-                  <span className="font-bold text-agro-secondary">
-                    {currentProperty
-                      ? currentProperty.nome
-                      : "Propriedade Padrão (Consolidado)"}
-                  </span>
-                  .
-                </p>
-              </div>
-            </div>
-            <div className="p-6 overflow-y-auto space-y-4">
-              {uploadMessage.text && (
-                <div
-                  className={`flex items-center gap-2.5 px-4 py-3 rounded-xl text-sm font-medium border ${uploadMessage.type === "error" ? "bg-rose-50 border-rose-200 text-rose-700" : "bg-emerald-50 border-emerald-200 text-emerald-700"}`}
-                >
-                  {uploadMessage.type === "error" ? (
-                    <AlertCircle size={18} />
-                  ) : (
-                    <CheckCircle size={18} />
-                  )}{" "}
-                  {uploadMessage.text}
+              <div className="flex items-center gap-6 w-full md:w-auto justify-between md:justify-end">
+                <div className="hidden sm:block border-r border-gray-200 pr-6 text-right">
+                  <p className="text-xs font-bold text-gray-500 mb-1 uppercase tracking-wider">
+                    Detalhamento (LCDPR)
+                  </p>
+                  <div className="flex items-center gap-2 justify-end mb-1">
+                    <span
+                      className="text-[10px] bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded font-bold"
+                      title="Peso Dedutível"
+                    >
+                      {percDedutivelModal.toFixed(1)}%
+                    </span>
+                    <span
+                      className="text-sm font-bold text-emerald-600 font-mono"
+                      title="Total Lançado no Livro"
+                    >
+                      {formatBRL(totalDedutivelModal)}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2 justify-end">
+                    <span
+                      className="text-[10px] bg-rose-100 text-rose-700 px-1.5 py-0.5 rounded font-bold"
+                      title="Peso Não Dedutível"
+                    >
+                      {percNaoDedutivelModal.toFixed(1)}%
+                    </span>
+                    <span
+                      className="text-xs font-bold text-rose-500 font-mono"
+                      title="Uso Pessoal (Não Lançado)"
+                    >
+                      {formatBRL(totalNaoDedutivelModal)}
+                    </span>
+                  </div>
                 </div>
-              )}
-              <label className="border-2 border-dashed border-emerald-200 rounded-xl p-8 flex flex-col items-center justify-center gap-3 bg-emerald-50/30 hover:bg-emerald-50 transition-colors cursor-pointer group">
-                <input
-                  type="file"
-                  multiple
-                  accept=".xml"
-                  className="hidden"
-                  onChange={handleFileSelect}
-                  disabled={isUploading}
-                />
-                <div className="w-14 h-14 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center group-hover:scale-110 transition-transform">
-                  <FileText size={28} />
-                </div>
-                <div className="text-center">
-                  <p className="text-sm font-semibold text-emerald-800">
-                    Clique para anexar XMLs
+                <div className="text-right">
+                  <p className="text-sm text-gray-500">Valor Total da Nota</p>
+                  <p className="text-2xl font-bold text-gray-800 font-mono">
+                    {formatBRL(selectedNotaModal.valorTotal)}
                   </p>
                 </div>
-              </label>
-              {selectedFiles.length > 0 && (
-                <div className="mt-4 max-h-40 overflow-y-auto space-y-2 pr-2">
-                  {selectedFiles.map((file, index) => (
-                    <div
-                      key={index}
-                      className="flex items-center justify-between bg-gray-50 border border-gray-100 p-2.5 rounded-lg"
-                    >
-                      <span className="text-sm font-medium text-gray-700 truncate">
-                        {file.name}
-                      </span>
-                      <button
-                        onClick={() =>
-                          setSelectedFiles((prev) =>
-                            prev.filter((_, i) => i !== index),
-                          )
-                        }
-                        disabled={isUploading}
-                        className="text-gray-400 hover:text-rose-500 p-1"
-                      >
-                        <X size={16} />
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-            <div className="p-6 border-t border-gray-100 bg-gray-50 flex items-center justify-end gap-3">
-              <button
-                onClick={() => {
-                  setIsImportModalOpen(false);
-                  setSelectedFiles([]);
-                }}
-                disabled={isUploading}
-                className="px-5 py-2.5 text-sm font-medium text-gray-600 hover:bg-gray-200 rounded-xl"
-              >
-                Cancelar
-              </button>
-              <button
-                onClick={handleUploadXMLs}
-                disabled={isUploading || selectedFiles.length === 0}
-                className="px-5 py-2.5 text-sm font-medium text-white bg-emerald-600 hover:bg-emerald-500 rounded-xl flex items-center gap-2"
-              >
-                {isUploading ? (
-                  <>
-                    <Loader2 size={18} className="animate-spin" />{" "}
-                    Processando...
-                  </>
-                ) : (
-                  "Iniciar Importação"
-                )}
-              </button>
+              </div>
             </div>
           </div>
         </div>
       )}
 
-      {/* MODAL DE DATA PERSONALIZADA */}
-      {showCustomDateModal && (
-        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm overflow-hidden">
-            <div className="p-5 border-b border-gray-100 flex justify-between items-center bg-gray-50">
+      {/* MINI-MODAL DO DETALHAMENTO DO NCM */}
+      {ncmModalData && (
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-[110] flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm overflow-hidden flex flex-col animate-in zoom-in-95 duration-200">
+            <div className="p-5 border-b border-gray-100 flex items-center justify-between bg-gray-50">
               <h2 className="font-bold text-gray-800 flex items-center gap-2">
-                <CalendarDays size={18} className="text-agro-secondary" />{" "}
-                Período Específico
+                <Info size={18} className="text-emerald-600" /> Detalhamento do
+                NCM
               </h2>
               <button
-                onClick={() => setShowCustomDateModal(false)}
-                className="text-gray-400 hover:text-gray-600"
+                onClick={() => setNcmModalData(null)}
+                className="p-1.5 hover:bg-gray-200 rounded-lg text-gray-400 transition-colors"
               >
                 <X size={20} />
               </button>
             </div>
+
             <div className="p-6 space-y-4">
-              <div>
-                <label className="block text-sm font-bold text-gray-600 mb-1">
-                  Data de Início
-                </label>
-                <input
-                  type="date"
-                  value={tempStartDate}
-                  onChange={(e) => setTempStartDate(e.target.value)}
-                  className="w-full px-4 py-2.5 bg-white border border-gray-200 rounded-xl outline-none focus:border-agro-secondary"
-                />
+              <div className="bg-emerald-50 text-emerald-800 font-mono font-bold px-3 py-2 rounded-lg text-center text-lg border border-emerald-100 shadow-sm">
+                {ncmModalData.ncm}
               </div>
-              <div>
-                <label className="block text-sm font-bold text-gray-600 mb-1">
-                  Data Final
-                </label>
-                <input
-                  type="date"
-                  value={tempEndDate}
-                  onChange={(e) => setTempEndDate(e.target.value)}
-                  className="w-full px-4 py-2.5 bg-white border border-gray-200 rounded-xl outline-none focus:border-agro-secondary"
-                />
+
+              <div className="space-y-1.5">
+                <p className="font-bold text-gray-400 uppercase tracking-wider text-[10px]">
+                  Capítulo {ncmModalData.cap}
+                </p>
+                <p className="font-semibold text-gray-800 text-sm leading-relaxed">
+                  {ncmModalData.descCap}
+                </p>
+              </div>
+
+              <div className="w-full h-px bg-gray-100" />
+
+              <div className="space-y-1.5">
+                <p className="font-bold text-gray-400 uppercase tracking-wider text-[10px]">
+                  Posição {ncmModalData.pos}
+                </p>
+                <p className="font-semibold text-gray-800 text-sm leading-relaxed">
+                  {ncmModalData.descPos}
+                </p>
               </div>
             </div>
-            <div className="p-5 border-t border-gray-100 bg-gray-50 flex justify-end gap-3">
+
+            <div className="p-5 border-t border-gray-100 bg-gray-50 flex justify-end">
               <button
-                onClick={() => setShowCustomDateModal(false)}
-                className="px-5 py-2.5 text-sm font-medium text-gray-600 hover:bg-gray-200 rounded-xl transition-colors"
+                onClick={() => setNcmModalData(null)}
+                className="px-6 py-2.5 text-sm font-bold text-white bg-emerald-600 hover:bg-emerald-500 rounded-xl shadow-sm transition-colors"
               >
-                Cancelar
-              </button>
-              <button
-                onClick={aplicarFiltroPersonalizado}
-                className="px-5 py-2.5 text-sm font-bold text-white bg-agro-secondary hover:bg-agro-primary rounded-xl shadow-sm transition-colors"
-              >
-                Aplicar Filtro
+                Entendi
               </button>
             </div>
           </div>

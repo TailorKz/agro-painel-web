@@ -20,20 +20,16 @@ import { toPng } from "html-to-image";
 export function SimuladorIRPR() {
   const { currentProducer, currentProperty } = useProducer();
   const baseUrl = import.meta.env.VITE_API_URL;
-
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
   const [isLoading, setIsLoading] = useState(false);
   const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
 
-  // Novo estado para controlar o Dropdown do Calendário
   const [showYearDropdown, setShowYearDropdown] = useState(false);
-
   const colDadosRef = useRef<HTMLDivElement>(null);
   const colResultadosRef = useRef<HTMLDivElement>(null);
 
   const [receitaBruta, setReceitaBruta] = useState("0,00");
   const [despesasDedutiveis, setDespesasDedutiveis] = useState("0,00");
-
   const [dependentes, setDependentes] = useState("0");
   const [saude, setSaude] = useState("0,00");
   const [educacao, setEducacao] = useState("0,00");
@@ -41,13 +37,11 @@ export function SimuladorIRPR() {
   const [pgbl, setPgbl] = useState("0,00");
   const [pensao, setPensao] = useState("0,00");
 
-  // Grelha completa de 15 anos para o Dropdown
   const anosDisponiveis = useMemo(() => {
     const anoAtual = new Date().getFullYear();
     return Array.from({ length: 15 }, (_, i) => anoAtual - 5 + i);
   }, []);
 
-  // Inteligência UX: Define os botões rápidos e garante que o ano selecionado esteja sempre visível
   const botoesAnosRapidos = useMemo(() => {
     const anoAtual = new Date().getFullYear();
     const anos = new Set([anoAtual - 1, anoAtual, anoAtual + 1, selectedYear]);
@@ -62,9 +56,7 @@ export function SimuladorIRPR() {
   const formatCurrencyInput = (value: string) => {
     const raw = value.replace(/\D/g, "");
     if (!raw) return "0,00";
-
     const numeric = parseInt(raw, 10) / 100;
-
     return numeric.toLocaleString("pt-BR", {
       minimumFractionDigits: 2,
       maximumFractionDigits: 2,
@@ -88,12 +80,21 @@ export function SimuladorIRPR() {
       );
       if (response.ok) {
         const totais = await response.json();
-        
-        // Aplica o Rateio (Exploração Conjunta)
-        const multiplicador = currentProperty ? (currentProperty.percentualParticipacao / 100) : 1;
-        
-        setReceitaBruta((totais.totalReceitas * multiplicador).toFixed(2).replace(".", ","));
-        setDespesasDedutiveis((totais.totalDespesasDedutiveis * multiplicador).toFixed(2).replace(".", ","));
+        const multiplicador = currentProperty
+          ? currentProperty.percentualParticipacao / 100
+          : 1;
+
+        // CORREÇÃO CIRÚRGICA DA FORMATAÇÃO DO VALOR DO BANCO
+        setReceitaBruta(
+          formatCurrencyInput(
+            (totais.totalReceitas * multiplicador).toFixed(2),
+          ),
+        );
+        setDespesasDedutiveis(
+          formatCurrencyInput(
+            (totais.totalDespesasDedutiveis * multiplicador).toFixed(2),
+          ),
+        );
       } else {
         setReceitaBruta("0,00");
         setDespesasDedutiveis("0,00");
@@ -113,13 +114,11 @@ export function SimuladorIRPR() {
     const elDados = colDadosRef.current;
     const elResultados = colResultadosRef.current;
     if (!elDados || !elResultados || !currentProducer) return;
-
     setIsGeneratingPdf(true);
     try {
       const pdf = new jsPDF("p", "mm", "a4");
       const margin = 10;
       const availableWidth = pdf.internal.pageSize.getWidth() - margin * 2;
-
       const capturarEImprimir = async (
         elemento: HTMLElement,
         isNovaPagina: boolean,
@@ -130,9 +129,7 @@ export function SimuladorIRPR() {
           pixelRatio: 2,
           fontEmbedCSS: "",
         });
-
         if (isNovaPagina) pdf.addPage();
-
         pdf.setFontSize(14);
         pdf.setFont("helvetica", "bold");
         pdf.text(
@@ -140,7 +137,6 @@ export function SimuladorIRPR() {
           margin,
           margin + 5,
         );
-
         pdf.setFontSize(10);
         pdf.setFont("helvetica", "normal");
         pdf.text(
@@ -148,10 +144,8 @@ export function SimuladorIRPR() {
           margin,
           margin + 12,
         );
-
         const imgProps = pdf.getImageProperties(dataUrl);
         const calcHeight = (imgProps.height * availableWidth) / imgProps.width;
-
         pdf.addImage(
           dataUrl,
           "PNG",
@@ -161,10 +155,8 @@ export function SimuladorIRPR() {
           calcHeight,
         );
       };
-
       await capturarEImprimir(elDados, false);
       await capturarEImprimir(elResultados, true);
-
       pdf.save(
         `Planejamento_IRPF_${currentProducer.name.split(" ")[0]}_${selectedYear}.pdf`,
       );
@@ -179,22 +171,17 @@ export function SimuladorIRPR() {
     const rb = parseCurrency(receitaBruta);
     const dd = parseCurrency(despesasDedutiveis);
     const deps = parseInt(dependentes) || 0;
-
     const lucroReal = Math.max(0, rb - dd);
     const lucroPresumido = rb * 0.2;
-
     const deducaoDependentes = deps * 2275.08;
     const tetoEducacao = (deps + 1) * 3561.5;
     const deducaoEducacao = Math.min(parseCurrency(educacao), tetoEducacao);
-
     const maxPgblReal = lucroReal * 0.12;
     const maxPgblPresumido = lucroPresumido * 0.12;
     const pgblDigitado = parseCurrency(pgbl);
-
     const deducaoSaude = parseCurrency(saude);
     const deducaoInss = parseCurrency(inss);
     const deducaoPensao = parseCurrency(pensao);
-
     const baseReal = Math.max(
       0,
       lucroReal -
@@ -215,7 +202,6 @@ export function SimuladorIRPR() {
         Math.min(pgblDigitado, maxPgblPresumido) -
         deducaoPensao,
     );
-
     const getFaixaIndex = (base: number) => {
       if (base <= 28467.2) return 0;
       if (base <= 33919.8) return 1;
@@ -223,7 +209,6 @@ export function SimuladorIRPR() {
       if (base <= 55976.16) return 3;
       return 4;
     };
-
     const calcularImposto = (base: number, faixaIndex: number) => {
       if (faixaIndex === 0) return 0;
       if (faixaIndex === 1) return base * 0.075 - 2135.04;
@@ -231,13 +216,10 @@ export function SimuladorIRPR() {
       if (faixaIndex === 3) return base * 0.225 - 8054.97;
       return base * 0.275 - 10853.78;
     };
-
     const faixaReal = getFaixaIndex(baseReal);
     const faixaPresumida = getFaixaIndex(basePresumida);
-
     const impostoReal = calcularImposto(baseReal, faixaReal);
     const impostoPresumido = calcularImposto(basePresumida, faixaPresumida);
-
     return {
       lucroReal,
       lucroPresumido,
@@ -263,7 +245,6 @@ export function SimuladorIRPR() {
     pensao,
   ]);
 
-  // Função para traduzir o índice da faixa para um texto elegante
   const getFaixaLabel = (index: number) => {
     const faixas = ["Isento (0%)", "7,50%", "15,00%", "22,50%", "27,50%"];
     return faixas[index] || "Isento (0%)";
@@ -283,7 +264,6 @@ export function SimuladorIRPR() {
             Lucro Presumido.
           </p>
         </div>
-
         <div className="flex items-center gap-3">
           {/* NOVO SELETOR DE ANOS */}
           <div className="bg-white p-1.5 rounded-xl border border-gray-200 shadow-sm flex items-center gap-1 relative z-50">
@@ -301,9 +281,7 @@ export function SimuladorIRPR() {
                 {ano}
               </button>
             ))}
-
             <div className="w-px h-6 bg-gray-200 mx-1" />
-
             <button
               onClick={() => setShowYearDropdown(!showYearDropdown)}
               disabled={isLoading || isGeneratingPdf}
@@ -324,7 +302,6 @@ export function SimuladorIRPR() {
               )}
               <ChevronDown size={14} />
             </button>
-
             {/* Dropdown Menu do Calendário */}
             {showYearDropdown && (
               <>
@@ -358,7 +335,6 @@ export function SimuladorIRPR() {
               </>
             )}
           </div>
-
           <button
             onClick={gerarRelatorioPDF}
             disabled={isGeneratingPdf}
@@ -374,22 +350,24 @@ export function SimuladorIRPR() {
         </div>
       </div>
 
-      {/* GRID SEPARADO EM DOIS REFS PARA O PDF DE 2 PÁGINAS */}
       <div className="grid grid-cols-1 xl:grid-cols-12 gap-6">
-        {/* PÁGINA 1 DO PDF: COLUNA ESQUERDA (DADOS) */}
         <div ref={colDadosRef} className="xl:col-span-4 space-y-4 p-2 -m-2">
           <div className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm relative overflow-hidden">
             <div className="flex items-center justify-between mb-4">
-             <div>
+              <div>
                 <div className="flex items-center gap-2">
-                  <h2 className="text-base font-bold text-gray-800 uppercase tracking-wider">Atividade Rural</h2>
+                  <h2 className="text-base font-bold text-gray-800 uppercase tracking-wider">
+                    Atividade Rural
+                  </h2>
                   {currentProperty && (
                     <span className="bg-amber-100 text-amber-800 text-[10px] font-bold px-2 py-0.5 rounded border border-amber-200">
                       Cota: {currentProperty.percentualParticipacao}%
                     </span>
                   )}
                 </div>
-                <p className="text-[10px] text-gray-400 mt-0.5">Pode ser alterado manualmente para testes.</p>
+                <p className="text-[10px] text-gray-400 mt-0.5">
+                  Pode ser alterado manualmente para testes.
+                </p>
               </div>
               <button
                 onClick={sincronizarDados}
@@ -406,7 +384,6 @@ export function SimuladorIRPR() {
                 )}
               </button>
             </div>
-
             <div className="space-y-4">
               <div className="space-y-1">
                 <label className="text-xs font-bold text-gray-600 uppercase">
@@ -426,7 +403,6 @@ export function SimuladorIRPR() {
                   />
                 </div>
               </div>
-
               <div className="space-y-1">
                 <label className="text-xs font-bold text-gray-600 uppercase">
                   Despesas Comprovadas (Saídas)
@@ -459,7 +435,6 @@ export function SimuladorIRPR() {
                 </p>
               </div>
             </div>
-
             <div className="space-y-5">
               <div className="space-y-1">
                 <div className="flex justify-between items-end">
@@ -566,7 +541,6 @@ export function SimuladorIRPR() {
           </div>
         </div>
 
-        {/* PÁGINA 2 DO PDF: COLUNA DIREITA (RESULTADOS) */}
         <div
           ref={colResultadosRef}
           className="xl:col-span-8 space-y-6 p-2 -m-2"
@@ -603,8 +577,6 @@ export function SimuladorIRPR() {
                     {formatBRL(calculos.lucroReal)}
                   </span>
                 </div>
-
-                {/* AQUI ESTÁ A SEPARAÇÃO DE FAIXA X ALÍQUOTA */}
                 <div className="flex justify-between text-sm">
                   <span className="text-gray-500">Faixa Aplicada (IR):</span>
                   <span className="font-mono font-bold text-gray-800">
@@ -671,8 +643,6 @@ export function SimuladorIRPR() {
                     {formatBRL(calculos.lucroPresumido)}
                   </span>
                 </div>
-
-                {/* AQUI ESTÁ A SEPARAÇÃO DE FAIXA X ALÍQUOTA */}
                 <div className="flex justify-between text-sm">
                   <span className="text-gray-500">Faixa Aplicada (IR):</span>
                   <span className="font-mono font-bold text-gray-800">
@@ -709,7 +679,6 @@ export function SimuladorIRPR() {
             </div>
           </div>
 
-          {/* TABELA PROGRESSIVA ANUAL */}
           <div className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
             <div className="flex items-center gap-2 mb-4">
               <span title="As deduções abatem a base de cálculo nos dois regimes.">
@@ -719,7 +688,6 @@ export function SimuladorIRPR() {
                 Tabela Progressiva Anual de IRPF
               </h3>
             </div>
-
             <div className="overflow-x-auto rounded-xl border border-gray-200">
               <table className="w-full text-left border-collapse bg-white text-sm">
                 <thead>
@@ -737,8 +705,8 @@ export function SimuladorIRPR() {
                     className={`hover:bg-gray-50 transition-colors ${calculos.faixaReal === 0 || calculos.faixaPresumida === 0 ? "bg-yellow-50/30" : ""}`}
                   >
                     <td className="px-4 py-3">Até R$ 28.467,20</td>
-                    <td className="px-4 py-3 text-center text-gray-400">—</td>
-                    <td className="px-4 py-3 text-right text-gray-400">—</td>
+                    <td className="px-4 py-3 text-center text-gray-400">-</td>
+                    <td className="px-4 py-3 text-right text-gray-400">-</td>
                     <td className="px-4 py-3 flex justify-center gap-2">
                       {calculos.faixaReal === 0 && (
                         <span className="bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded text-[10px] font-sans font-bold flex items-center gap-1">

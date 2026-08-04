@@ -6,6 +6,7 @@ import {
   Settings,
   LogOut,
   ShieldCheck,
+  BookOpen,
 } from "lucide-react";
 
 export function AdminDashboardLayout() {
@@ -34,6 +35,11 @@ export function AdminDashboardLayout() {
       path: "/admin/dashboard/contadores",
       icon: Users,
       label: "Gestão de Escritórios",
+    },
+    {
+      path: "/admin/dashboard/regras-fiscais",
+      icon: BookOpen,
+      label: "Config. NCM e CFOP",
     },
     {
       path: "/admin/dashboard/configuracoes",
