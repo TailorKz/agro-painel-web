@@ -32,27 +32,41 @@ export function DashboardLayout() {
   const adminBackupToken = localStorage.getItem("@AgroPops:adminBackupToken");
 
   useEffect(() => {
-    const role = localStorage.getItem("@AgroPops:userRole") as
-      | "CONTADOR"
-      | "PRODUTOR";
+    // Busca a credencial real armazenada no navegador (Sem forçar tipagem)
+    const rawRole = localStorage.getItem("@AgroPops:userRole");
     const token = localStorage.getItem("@AgroPops:token");
-    if (token && role) {
-      setUserRole(role);
-      if (role === "CONTADOR") {
-        const contador = JSON.parse(
-          localStorage.getItem("@AgroPops:contador") || "{}",
-        );
-        setUserName(
-          contador.nomeResponsavel || contador.nomeEscritorio || "Contador",
-        );
-      } else {
-        const produtor = JSON.parse(
-          localStorage.getItem("@AgroPops:produtorData") || "{}",
-        );
-        setUserName(produtor.nome || "Produtor");
-      }
-    } else {
+
+    // --- BLINDAGEM CONTRA COLISÃO DE ABAS ---
+    // Se o Local Storage diz que quem está usando o PC é um ADMIN, expulsa de volta pro painel dele.
+    if (rawRole === "ADMIN") {
+      window.location.href = "/admin/dashboard";
+      return;
+    }
+
+    if (!token || !rawRole) {
       navigate("/login");
+      return;
+    }
+
+    const role = rawRole as "CONTADOR" | "PRODUTOR";
+    setUserRole(role);
+
+    if (role === "CONTADOR") {
+      const contador = JSON.parse(
+        localStorage.getItem("@AgroPops:contador") || "{}",
+      );
+      setUserName(
+        contador.nomeResponsavel || contador.nomeEscritorio || "Contador",
+      );
+    } else if (role === "PRODUTOR") {
+      const produtor = JSON.parse(
+        localStorage.getItem("@AgroPops:produtorData") || "{}",
+      );
+      setUserName(produtor.nome || "Produtor");
+    } else {
+      // Prevenção extra de segurança: Se a Role for qualquer outra coisa (manipulação local), desloga.
+      localStorage.clear();
+      window.location.href = "/login";
     }
   }, [navigate]);
 

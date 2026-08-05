@@ -313,15 +313,15 @@ export function Produtores() {
     setCurrentStep((prev) => prev + 1);
   };
 
-  const handleSalvar = async () => {
+ const handleSalvar = async () => {
     const contadorData = localStorage.getItem("@AgroPops:contador");
     if (!contadorData) return;
     const contadorId = JSON.parse(contadorData).id;
 
     const formData = new FormData();
 
-    // Se for modo edição, envia o ID
-    if (editingId) formData.append("id", editingId);
+    // Correção 1: Garantir que o ID seja enviado como String segura para o FormData
+    if (editingId) formData.append("id", String(editingId));
 
     formData.append("nome", nome);
     formData.append("cpfCnpj", cpfCnpj.replace(/\D/g, ""));
@@ -331,10 +331,13 @@ export function Produtores() {
     formData.append("contadorId", contadorId);
 
     const propriedadesLimpas = propriedades.map((p) => ({
+      // Se for edição, mandamos o id se ele for um ID real do banco (ou omitimos se preferir recriar)
+      // O pulo do gato: se o ID for muito grande (gerado por Date.now()), mandamos null para o Java entender que é nova!
+      id: p.id > 1000000000 ? null : p.id, 
       nome: p.nome,
-      cpfCnpj: p.cpfCnpj.replace(/\D/g, ""), // Limpa máscara antes de enviar
-      inscricaoEstadual: p.inscricaoEstadual,
-      caepf: p.caepf,
+      cpfCnpj: p.cpfCnpj ? String(p.cpfCnpj).replace(/\D/g, "") : "",
+      inscricaoEstadual: p.inscricaoEstadual ? p.inscricaoEstadual.replace(/\D/g, "") : "",
+      caepf: p.caepf ? p.caepf.replace(/\D/g, "") : "",
       percentualParticipacao: parseFloat(p.percentualParticipacao.toString()),
     }));
     formData.append("propriedades", JSON.stringify(propriedadesLimpas));

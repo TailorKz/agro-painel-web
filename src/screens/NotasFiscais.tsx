@@ -19,6 +19,10 @@ import {
   Info,
   Plus,
   ListOrdered,
+  ArrowRightLeft,
+  ScanBarcode,
+  Copy,
+  ExternalLink,
 } from "lucide-react";
 import { useProducer } from "../context/ProducerContext";
 import { NCM_CAPITULOS, NCM_POSICOES } from "../utils/dicionarioNcm";
@@ -35,6 +39,10 @@ type ItemNota = {
 type NotaFiscal = {
   id: number;
   numero: string;
+  chaveAcesso?: string;
+  naturezaOperacao?: string;
+  nomeEmitente?: string;
+  nomeDestinatario?: string;
   dataEmissao: string;
   tipo: "ENTRADA" | "SAIDA";
   valorTotal: number;
@@ -44,9 +52,7 @@ type NotaFiscal = {
   parcelas?: any[];
 };
 
-// ==========================================
-// MOTOR DE ANÁLISE DE CFOP (BASEADO NO SUFIXO)
-// ==========================================
+// NÁLISE DE CFOP (BASEADO NO SUFIXO)
 const getCFOPInfo = (cfopStr?: string) => {
   if (!cfopStr || cfopStr.length < 4)
     return {
@@ -241,6 +247,162 @@ export function NotasFiscais() {
     descricao: string;
     cor: string;
   } | null>(null);
+
+  // ESTADOS DO NOVO LANÇAMENTO MANUAL (NOTAS/CUPONS)
+  const [isManualNotaModalOpen, setIsManualNotaModalOpen] = useState(false);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const [fornecedores, setFornecedores] = useState<any[]>([]);
+
+  const [manualForm, setManualForm] = useState({
+    tipo: "SAIDA",
+    dataEmissao: new Date().toISOString().split("T")[0],
+    empresaEnvolvida: "",
+    cpfCnpj: "",
+    numero: "",
+    valorTotal: "",
+    isDedutivel: true,
+  });
+
+  const [manualParcelas, setManualParcelas] = useState<any[]>([
+    {
+      id: Date.now(),
+      numeroParcela: "001",
+      dataVencimento: new Date().toISOString().split("T")[0],
+      valor: "",
+    },
+  ]);
+
+  const [showParcelasManual, setShowParcelasManual] = useState(false);
+
+  useEffect(() => {
+    const fetchFornecedores = async () => {
+      const userRole = localStorage.getItem("@AgroPops:userRole");
+      if (userRole !== "CONTADOR") return;
+      const contadorData = JSON.parse(
+        localStorage.getItem("@AgroPops:contador") || "{}",
+      );
+      if (!contadorData.id) return;
+      try {
+        const token = localStorage.getItem("@AgroPops:token");
+        const res = await fetch(
+          `${baseUrl}/fornecedores/listar/${contadorData.id}`,
+          {
+            headers: { Authorization: `Bearer ${token}` },
+          },
+        );
+        if (res.ok) setFornecedores(await res.json());
+      } catch (err) {
+        console.error(err);
+      }
+    };
+    fetchFornecedores();
+  }, [baseUrl]);
+
+  const fornecedoresFiltrados = useMemo(() => {
+    if (!manualForm.empresaEnvolvida) return [];
+    return fornecedores.filter(
+      (f) =>
+        f.nome
+          .toLowerCase()
+          .includes(manualForm.empresaEnvolvida.toLowerCase()) ||
+        (f.cpfCnpj && f.cpfCnpj.includes(manualForm.empresaEnvolvida)),
+    );
+  }, [fornecedores, manualForm.empresaEnvolvida]);
+
+  const handleAddParcelaManual = () => {
+    setManualParcelas([
+      ...manualParcelas,
+      {
+        id: Date.now(),
+        numeroParcela: String(manualParcelas.length + 1).padStart(3, "0"),
+        dataVencimento: manualForm.dataEmissao,
+        valor: "",
+      },
+    ]);
+  };
+
+  const handleRemoveParcelaManual = (id: number) => {
+    const novas = manualParcelas.filter((p) => p.id !== id);
+    novas.forEach((p, i) => (p.numeroParcela = String(i + 1).padStart(3, "0")));
+    setManualParcelas(novas);
+  };
+
+  const handleSalvarNotaManual = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!currentProducer) return;
+
+    const valorTotalNum =
+      parseFloat(manualForm.valorTotal.replace(/\./g, "").replace(",", ".")) ||
+      0;
+
+    // Se o usuário abriu a aba de parcelas, validam a soma. Se não, ignora.
+    if (showParcelasManual) {
+      const somaParcelas = manualParcelas.reduce(
+        (acc, p) =>
+          acc + (parseFloat(p.valor.replace(/\./g, "").replace(",", ".")) || 0),
+        0,
+      );
+      if (Math.abs(somaParcelas - valorTotalNum) > 0.1) {
+        alert(
+          `A soma das parcelas (${formatBRL(somaParcelas)}) deve ser igual ao valor total (${formatBRL(valorTotalNum)}).`,
+        );
+        return;
+      }
+    }
+
+    setIsUploading(true);
+    try {
+      const token = localStorage.getItem("@AgroPops:token");
+      const payload = {
+        ...manualForm,
+        valorTotal: valorTotalNum,
+        propriedadeId: currentProperty ? currentProperty.id : null,
+        parcelas: showParcelasManual
+          ? manualParcelas.map((p) => ({
+              numeroParcela: p.numeroParcela,
+              dataVencimento: p.dataVencimento,
+              valor:
+                parseFloat(p.valor.replace(/\./g, "").replace(",", ".")) || 0,
+            }))
+          : [],
+      };
+
+      const res = await fetch(`${baseUrl}/notas/manual/${currentProducer.id}`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(payload),
+      });
+
+      if (res.ok) {
+        setIsManualNotaModalOpen(false);
+        setManualForm({
+          ...manualForm,
+          empresaEnvolvida: "",
+          cpfCnpj: "",
+          numero: "",
+          valorTotal: "",
+        });
+        setManualParcelas([
+          {
+            id: Date.now(),
+            numeroParcela: "001",
+            dataVencimento: new Date().toISOString().split("T")[0],
+            valor: "",
+          },
+        ]);
+        buscarNotas();
+      } else {
+        alert(await res.text());
+      }
+    } catch (err) {
+      alert("Erro de conexão ao salvar a nota.");
+    } finally {
+      setIsUploading(false);
+    }
+  };
 
   const obterParametrosDeData = useCallback(
     (periodo: string | number) => {
@@ -749,6 +911,23 @@ export function NotasFiscais() {
               <Trash2 size={18} /> Apagar Seleção
             </button>
             <button
+              onClick={() =>
+                alert("Módulo de Leitura por Scanner em desenvolvimento!")
+              }
+              className="flex items-center gap-2 bg-blue-50 text-blue-700 border border-blue-200 px-4 py-2.5 rounded-xl font-medium hover:bg-blue-100 transition-colors shadow-sm text-sm"
+            >
+              <ScanBarcode size={18} /> Escanear
+            </button>
+            <button
+              onClick={() => {
+                setShowParcelasManual(false); // Garante que abra fechado
+                setIsManualNotaModalOpen(true);
+              }}
+              className="flex items-center gap-2 bg-agro-secondary hover:bg-agro-primary text-white px-4 py-2.5 rounded-xl font-medium transition-colors shadow-sm text-sm"
+            >
+              <Edit3 size={18} /> Lançar Manual
+            </button>
+            <button
               onClick={() => setIsImportModalOpen(true)}
               className="flex items-center gap-2 bg-emerald-50 text-emerald-700 border border-emerald-200 px-4 py-2.5 rounded-xl font-medium hover:bg-emerald-100 transition-colors shadow-sm text-sm"
             >
@@ -920,45 +1099,92 @@ export function NotasFiscais() {
       {/* ============================================================== */}
       {/* MODAL: DETALHES DA NOTA (ITENS, PARCELAS E CLASSIFICAÇÃO) */}
       {/* ============================================================== */}
-      {selectedNotaModal && (
+     {selectedNotaModal && (
         <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-6xl overflow-hidden flex flex-col max-h-[90vh]">
+            
+            {/* CABEÇALHO DO MODAL */}
             <div className="p-6 border-b border-gray-100 flex items-center justify-between bg-gray-50">
               <div className="flex items-center gap-4">
+                <div className="w-12 h-12 bg-agro-secondary/10 text-agro-secondary rounded-xl flex items-center justify-center shrink-0 shadow-inner border border-emerald-100">
+                  <FileText size={24} />
+                </div>
                 <div>
                   <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2">
-                    <FileText className="text-agro-secondary" /> Nota Fiscal Nº{" "}
-                    {selectedNotaModal.numero}
+                    Nota Fiscal Nº {selectedNotaModal.numero}
                   </h2>
-                  <p className="text-sm text-gray-500 mt-1">
-                    {selectedNotaModal.empresaEnvolvida} • Emissão:{" "}
-                    {formatarData(selectedNotaModal.dataEmissao)}
-                  </p>
-                  {selectedNotaModal.chaveAcessoReferencia && (
-                    <div className="mt-3 p-2.5 bg-sky-50 border border-sky-100 rounded-lg flex items-start gap-2 max-w-xl">
-                      <RotateCcw
-                        size={16}
-                        className="text-sky-600 mt-0.5 shrink-0"
-                      />
-                      <div>
-                        <p className="text-xs font-bold text-sky-800">
-                          Nota de Devolução (Estorno)
-                        </p>
-                        <p className="text-[10px] text-sky-600 font-mono mt-0.5 break-all">
-                          Referente à Chave:{" "}
-                          {selectedNotaModal.chaveAcessoReferencia}
-                        </p>
-                      </div>
-                    </div>
-                  )}
+                  <div className="flex items-center gap-2 mt-1.5">
+                    <span 
+                      onClick={() => {
+                        if (selectedNotaModal.chaveAcesso) {
+                          navigator.clipboard.writeText(selectedNotaModal.chaveAcesso);
+                        }
+                      }}
+                      className="text-[11px] font-mono bg-white border border-gray-200 text-gray-600 px-2.5 py-1 rounded-md cursor-pointer hover:bg-gray-100 hover:text-gray-800 transition-colors flex items-center gap-1.5 shadow-sm"
+                      title="Clique para copiar a chave"
+                    >
+                      <Copy size={12} /> {selectedNotaModal.chaveAcesso || "Lançamento Manual (Sem Chave)"}
+                    </span>
+                    {selectedNotaModal.chaveAcesso && (
+                      <a 
+                        href="https://www.nfe.fazenda.gov.br/portal/consultaRecaptcha.aspx?tipoConsulta=resumo&tipoConteudo=7PhJ+gAVw2g="
+                        target="_blank" 
+                        rel="noreferrer"
+                        className="text-white bg-agro-secondary hover:bg-agro-primary px-2 py-1 rounded-md transition-colors shadow-sm flex items-center gap-1 text-[11px] font-bold"
+                        title="Ir para o Portal Nacional (A chave já está na sua área de transferência)"
+                      >
+                        Portal Nacional <ExternalLink size={12} />
+                      </a>
+                    )}
+                  </div>
                 </div>
               </div>
               <button
                 onClick={() => setSelectedNotaModal(null)}
-                className="p-2 hover:bg-gray-200 rounded-lg text-gray-400"
+                className="p-2 hover:bg-gray-200 rounded-lg text-gray-400 self-start"
               >
                 <X size={20} />
               </button>
+            </div>
+
+            {/* BARRA DE INFORMAÇÕES DETALHADAS (FONTE DE VERDADE DO XML) */}
+            <div className="px-6 py-4 bg-white border-b border-gray-100 flex flex-col gap-4 text-sm">
+               <div className="flex flex-wrap gap-6">
+                 <div className="flex-1 min-w-[200px]">
+                   <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-0.5">Emitente (Origem)</p>
+                   <p className="font-semibold text-gray-800 truncate" title={selectedNotaModal.nomeEmitente || selectedNotaModal.empresaEnvolvida}>
+                      {selectedNotaModal.nomeEmitente || selectedNotaModal.empresaEnvolvida}
+                   </p>
+                 </div>
+                 <div className="flex-1 min-w-[200px]">
+                   <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-0.5">Destinatário (Destino)</p>
+                   <p className="font-semibold text-gray-800 truncate" title={selectedNotaModal.nomeDestinatario || selectedNotaModal.empresaEnvolvida}>
+                      {selectedNotaModal.nomeDestinatario || selectedNotaModal.empresaEnvolvida}
+                   </p>
+                 </div>
+                 <div className="flex-1 min-w-[200px]">
+                   <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-0.5">Natureza da Operação</p>
+                   <p className="font-semibold text-gray-800 truncate" title={selectedNotaModal.naturezaOperacao || "Não informada"}>
+                      {selectedNotaModal.naturezaOperacao || "Não informada"}
+                   </p>
+                 </div>
+                 <div className="flex-1 min-w-[120px]">
+                   <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-0.5">Data Emissão</p>
+                   <p className="font-semibold text-gray-800">
+                      {formatarData(selectedNotaModal.dataEmissao)}
+                   </p>
+                 </div>
+               </div>
+               
+               {selectedNotaModal.chaveAcessoReferencia && (
+                 <div className="p-2.5 bg-sky-50 border border-sky-100 rounded-lg flex items-center gap-2 w-fit pr-6">
+                   <RotateCcw size={16} className="text-sky-600 shrink-0" />
+                   <div>
+                     <p className="text-xs font-bold text-sky-800">Nota de Devolução (Contra-Nota)</p>
+                     <p className="text-[10px] text-sky-600 font-mono mt-0.5">Referente à Chave: {selectedNotaModal.chaveAcessoReferencia}</p>
+                   </div>
+                 </div>
+               )}
             </div>
 
             <div className="flex px-6 bg-gray-50 border-b border-gray-100 pt-2">
@@ -1346,6 +1572,375 @@ export function NotasFiscais() {
                   </p>
                 </div>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ============================================================== */}
+      {/* MODAL: LANÇAMENTO MANUAL (NOTAS E CUPONS) */}
+      {/* ============================================================== */}
+      {isManualNotaModalOpen && (
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-[60] flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-3xl overflow-hidden flex flex-col max-h-[90vh]">
+            <div className="p-6 border-b border-gray-100 flex items-center justify-between bg-gray-50">
+              <h2 className="text-lg font-bold text-gray-800 flex items-center gap-2">
+                <Edit3 className="text-agro-secondary" /> Novo Documento Fiscal
+                Manual
+              </h2>
+              <button
+                onClick={() => setIsManualNotaModalOpen(false)}
+                className="p-2 hover:bg-gray-200 rounded-lg text-gray-400"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            <form
+              onSubmit={handleSalvarNotaManual}
+              className="flex-1 overflow-y-auto p-6 space-y-6"
+            >
+              {/* Box Informativo de Destino */}
+              <div className="bg-slate-50 border border-slate-200 p-3.5 rounded-xl flex items-start gap-3 shadow-sm">
+                <div className="text-slate-400 mt-0.5">
+                  <Info size={18} />
+                </div>
+                <div>
+                  <p className="text-sm text-slate-700 font-bold">
+                    Destino do Lançamento:
+                  </p>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    Produtor: <b>{currentProducer?.name}</b> <br />
+                    Imóvel:{" "}
+                    <b>
+                      {currentProperty
+                        ? currentProperty.nome
+                        : "Propriedade Padrão (Consolidado)"}
+                    </b>
+                  </p>
+                </div>
+              </div>
+
+              {/* Tipo de Operação */}
+              <div className="flex items-center justify-between gap-2 bg-gray-50 p-1.5 rounded-xl border border-gray-200 shadow-inner max-w-sm mx-auto">
+                <button
+                  type="button"
+                  onClick={() =>
+                    setManualForm({ ...manualForm, tipo: "SAIDA" })
+                  }
+                  className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all duration-300 ${manualForm.tipo === "SAIDA" ? "bg-rose-600 text-white shadow-md scale-[1.02]" : "bg-rose-100 text-rose-500 hover:bg-rose-200"}`}
+                >
+                  DESPESA (Compra)
+                </button>
+                <div className="text-gray-300 shrink-0 px-1">
+                  <ArrowRightLeft size={16} />
+                </div>
+                <button
+                  type="button"
+                  onClick={() =>
+                    setManualForm({ ...manualForm, tipo: "ENTRADA" })
+                  }
+                  className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all duration-300 ${manualForm.tipo === "ENTRADA" ? "bg-emerald-600 text-white shadow-md scale-[1.02]" : "bg-emerald-100 text-emerald-600 hover:bg-emerald-200"}`}
+                >
+                  RECEITA (Venda)
+                </button>
+              </div>
+
+              {/* Dados da Nota */}
+              <div className="bg-white border border-gray-100 p-5 rounded-xl space-y-4 shadow-sm">
+                <h3 className="text-sm font-bold text-gray-400 uppercase tracking-wider mb-2">
+                  Dados do Documento
+                </h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-1 relative">
+                    <label className="text-xs font-bold text-gray-600 uppercase">
+                      Fornecedor / Cliente (Pesquise)
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="Ex: Cooperativa Agro"
+                      value={manualForm.empresaEnvolvida}
+                      onFocus={() => setShowSuggestions(true)}
+                      onBlur={() =>
+                        setTimeout(() => setShowSuggestions(false), 200)
+                      }
+                      onChange={(e) => {
+                        setManualForm({
+                          ...manualForm,
+                          empresaEnvolvida: e.target.value,
+                        });
+                        setShowSuggestions(true);
+                      }}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg outline-none text-sm focus:border-agro-secondary"
+                    />
+                    {showSuggestions && fornecedoresFiltrados.length > 0 && (
+                      <ul className="absolute z-50 left-0 right-0 top-[60px] bg-white border border-gray-200 rounded-xl shadow-xl max-h-48 overflow-y-auto divide-y divide-gray-100">
+                        {fornecedoresFiltrados.map((f) => (
+                          <li
+                            key={f.id}
+                            onMouseDown={(e) => e.preventDefault()}
+                            onClick={() => {
+                              setManualForm({
+                                ...manualForm,
+                                empresaEnvolvida: f.nome,
+                                cpfCnpj: f.cpfCnpj || "",
+                              });
+                              setShowSuggestions(false);
+                            }}
+                            className="px-4 py-2.5 hover:bg-emerald-50 cursor-pointer flex justify-between items-center transition-colors"
+                          >
+                            <span className="text-sm font-bold text-gray-800">
+                              {f.nome}
+                            </span>
+                            {f.cpfCnpj && (
+                              <span className="text-xs font-mono text-gray-400">
+                                {f.cpfCnpj}
+                              </span>
+                            )}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-gray-600 uppercase">
+                      CPF / CNPJ (Opcional)
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="Apenas números"
+                      value={manualForm.cpfCnpj}
+                      onChange={(e) =>
+                        setManualForm({
+                          ...manualForm,
+                          cpfCnpj: e.target.value.replace(/\D/g, ""),
+                        })
+                      }
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg outline-none text-sm font-mono focus:border-agro-secondary"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-gray-600 uppercase">
+                      Nº Documento / Cupom
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="Ex: 12345"
+                      value={manualForm.numero}
+                      onChange={(e) =>
+                        setManualForm({ ...manualForm, numero: e.target.value })
+                      }
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg outline-none text-sm focus:border-agro-secondary"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-gray-600 uppercase">
+                      Data de Emissão
+                    </label>
+                    <input
+                      type="date"
+                      required
+                      value={manualForm.dataEmissao}
+                      onChange={(e) =>
+                        setManualForm({
+                          ...manualForm,
+                          dataEmissao: e.target.value,
+                        })
+                      }
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg outline-none text-sm focus:border-agro-secondary"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-end pt-2 border-t border-gray-100">
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-gray-600 uppercase">
+                      Valor Total (R$)
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="0,00"
+                      value={manualForm.valorTotal}
+                      onChange={(e) => {
+                        const val = e.target.value.replace(/[^0-9,.-]/g, "");
+                        setManualForm({ ...manualForm, valorTotal: val });
+                        if (manualParcelas.length === 1)
+                          setManualParcelas([
+                            { ...manualParcelas[0], valor: val },
+                          ]);
+                      }}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg outline-none text-lg font-mono font-bold focus:border-agro-secondary text-right text-gray-800"
+                    />
+                  </div>
+                  {manualForm.tipo === "SAIDA" && (
+                    <label className="flex items-center gap-2 cursor-pointer select-none bg-gray-50 p-3 rounded-xl border border-gray-200 hover:bg-gray-100 transition-colors">
+                      <input
+                        type="checkbox"
+                        checked={manualForm.isDedutivel}
+                        onChange={(e) =>
+                          setManualForm({
+                            ...manualForm,
+                            isDedutivel: e.target.checked,
+                          })
+                        }
+                        className="rounded border-gray-300 text-agro-secondary focus:ring-agro-secondary h-5 w-5"
+                      />
+                      <div className="text-sm">
+                        <p className="font-bold text-gray-700">
+                          Dedutível no Livro Caixa?
+                        </p>
+                        <p className="text-[11px] text-gray-500">
+                          Marque se esta despesa abate imposto no LCDPR
+                        </p>
+                      </div>
+                    </label>
+                  )}
+                </div>
+              </div>
+
+              {/* Botão de Toggle do Parcelamento */}
+              <div className="flex justify-center">
+                <button
+                  type="button"
+                  onClick={() => setShowParcelasManual(!showParcelasManual)}
+                  className="flex items-center gap-2 text-sm font-bold text-blue-600 hover:text-blue-800 transition-colors bg-blue-50 px-4 py-2 rounded-full border border-blue-100"
+                >
+                  <CalendarDays size={16} />
+                  {showParcelasManual
+                    ? "Ocultar Parcelamento"
+                    : "Adicionar Parcelamento (Opcional)"}
+                </button>
+              </div>
+
+              {/* Parcelamento Condicional */}
+              {showParcelasManual && (
+                <div className="bg-blue-50/30 border border-blue-100 p-5 rounded-xl space-y-4 animate-in fade-in slide-in-from-top-2">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h3 className="text-sm font-bold text-blue-800 uppercase tracking-wider">
+                        Vencimentos e Parcelas
+                      </h3>
+                      <p className="text-xs text-blue-600/80">
+                        Apenas altere aqui se o pagamento for parcelado ou
+                        futuro.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleAddParcelaManual}
+                      className="flex items-center gap-1.5 bg-blue-100 text-blue-700 hover:bg-blue-200 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors"
+                    >
+                      <Plus size={14} /> Adicionar Parcela
+                    </button>
+                  </div>
+
+                  <div className="space-y-2">
+                    {manualParcelas.map((p, index) => (
+                      <div
+                        key={p.id}
+                        className="flex items-center gap-3 bg-white p-2 rounded-lg border border-blue-100 shadow-sm"
+                      >
+                        <div className="w-16">
+                          <input
+                            type="text"
+                            value={p.numeroParcela}
+                            onChange={(e) => {
+                              const novas = [...manualParcelas];
+                              novas[index].numeroParcela = e.target.value;
+                              setManualParcelas(novas);
+                            }}
+                            className="w-full px-2 py-1.5 border border-gray-200 rounded text-center text-xs font-mono outline-none focus:border-blue-400"
+                          />
+                        </div>
+                        <div className="flex-1">
+                          <input
+                            type="date"
+                            value={p.dataVencimento}
+                            onChange={(e) => {
+                              const novas = [...manualParcelas];
+                              novas[index].dataVencimento = e.target.value;
+                              setManualParcelas(novas);
+                            }}
+                            className="w-full px-2 py-1.5 border border-gray-200 rounded text-sm outline-none focus:border-blue-400 font-medium text-blue-800"
+                          />
+                        </div>
+                        <div className="flex-1 relative">
+                          <span className="absolute left-2 top-1/2 -translate-y-1/2 text-xs text-gray-400 font-mono">
+                            R$
+                          </span>
+                          <input
+                            type="text"
+                            value={p.valor}
+                            placeholder="0,00"
+                            onChange={(e) => {
+                              const novas = [...manualParcelas];
+                              novas[index].valor = e.target.value.replace(
+                                /[^0-9,.-]/g,
+                                "",
+                              );
+                              setManualParcelas(novas);
+                            }}
+                            className="w-full pl-7 pr-2 py-1.5 border border-gray-200 rounded text-sm outline-none focus:border-blue-400 font-mono font-bold text-right"
+                          />
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveParcelaManual(p.id)}
+                          disabled={manualParcelas.length === 1}
+                          className="p-1.5 text-gray-400 hover:text-rose-500 hover:bg-rose-50 rounded transition-colors disabled:opacity-30"
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+
+                  {manualForm.valorTotal && (
+                    <div
+                      className={`mt-2 text-right text-xs font-bold ${Math.abs(manualParcelas.reduce((acc, p) => acc + (parseFloat(p.valor.replace(/\./g, "").replace(",", ".")) || 0), 0) - (parseFloat(manualForm.valorTotal.replace(/\./g, "").replace(",", ".")) || 0)) > 0.1 ? "text-amber-600" : "text-emerald-600"}`}
+                    >
+                      Soma das Parcelas: R${" "}
+                      {manualParcelas
+                        .reduce(
+                          (acc, p) =>
+                            acc +
+                            (parseFloat(
+                              p.valor.replace(/\./g, "").replace(",", "."),
+                            ) || 0),
+                          0,
+                        )
+                        .toLocaleString("pt-BR", { minimumFractionDigits: 2 })}
+                    </div>
+                  )}
+                </div>
+              )}
+            </form>
+
+            <div className="p-5 border-t border-gray-100 bg-gray-50 flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setIsManualNotaModalOpen(false)}
+                disabled={isUploading}
+                className="px-5 py-2.5 text-sm font-medium text-gray-600 hover:bg-gray-200 rounded-xl transition-colors"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleSalvarNotaManual}
+                disabled={isUploading}
+                className="px-6 py-2.5 text-sm font-bold text-white bg-agro-secondary hover:bg-agro-primary rounded-xl shadow-sm transition-colors flex items-center gap-2"
+              >
+                {isUploading ? (
+                  <>
+                    <Loader2 size={18} className="animate-spin" /> Salvando...
+                  </>
+                ) : (
+                  "Lançar Documento Fiscal"
+                )}
+              </button>
             </div>
           </div>
         </div>

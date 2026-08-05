@@ -20,6 +20,8 @@ import {
   ListOrdered,
   CalendarDays,
   HelpCircle,
+  Copy,
+  ExternalLink,
 } from "lucide-react";
 import { useProducer } from "../context/ProducerContext";
 import { NCM_CAPITULOS, NCM_POSICOES } from "../utils/dicionarioNcm";
@@ -34,6 +36,8 @@ type Lancamento = {
   valor: number;
   isDedutivel: boolean;
   notaId?: number;
+  percDedutivel: number;
+  valorDedutivel: number;
 };
 
 const MESES = [
@@ -146,7 +150,7 @@ const getCFOPInfo = (cfopStr?: string) => {
       desc =
         "Remessas para depósito fechado, armazém geral ou estocagem (não há compra, apenas guarda).";
     else if (["910", "911", "912", "913"].includes(sufixo))
-      desc = "Remessas para demonstração, mostruário ou feiras.";
+      desc = "Remessas para demonstração, doação, brinde mostruário ou feiras.";
     else if (["915", "916"].includes(sufixo))
       desc =
         "Remessa para conserto ou manutenção (a peça nova é dedutível pelo X.102, mas a remessa para oficina não é).";
@@ -205,10 +209,6 @@ export function LivroCaixa() {
   const [formData, setFormData] = useState({
     data: new Date().toISOString().split("T")[0],
     tipo: "SAIDA",
-    tipoDocumento: "3",
-    documento: "",
-    nomeParticipante: "",
-    cpfCnpjParticipante: "",
     historico: "",
     valor: "",
     isDedutivel: true,
@@ -331,8 +331,9 @@ export function LivroCaixa() {
     const agrupado = MESES.map(() => ({
       lancamentos: [] as Lancamento[],
       totalEntradas: 0,
-      totalSaidas: 0,
       totalDedutivel: 0,
+      saldoMes: 0,
+      saldoAcumulado: 0,
     }));
 
     const multiplicador = currentProperty
@@ -344,43 +345,48 @@ export function LivroCaixa() {
       const mes = parseInt(lanc.data.split("-")[1]) - 1;
 
       if (ano === selectedYear) {
+        // Multiplicador da fazenda age sobre tudo!
         const valorRateado = lanc.valor * multiplicador;
-        agrupado[mes].lancamentos.push({ ...lanc, valor: valorRateado });
+        const dedutivelRateado = lanc.valorDedutivel * multiplicador;
+
+        agrupado[mes].lancamentos.push({
+          ...lanc,
+          valor: valorRateado,
+          valorDedutivel: dedutivelRateado,
+        });
 
         if (lanc.tipo === "ENTRADA") {
           agrupado[mes].totalEntradas += valorRateado;
         } else {
-          agrupado[mes].totalSaidas += valorRateado;
-          if (lanc.isDedutivel) {
-            agrupado[mes].totalDedutivel += valorRateado;
-          }
+          agrupado[mes].totalDedutivel += dedutivelRateado;
         }
       }
     });
+
+    // Calcula Saldo do Mês e Saldo Acumulado Sequencial
+    let acumulado = 0;
+    for (let i = 0; i < 12; i++) {
+      agrupado[i].saldoMes =
+        agrupado[i].totalEntradas - agrupado[i].totalDedutivel;
+      acumulado += agrupado[i].saldoMes;
+      agrupado[i].saldoAcumulado = acumulado;
+    }
+
     return agrupado;
   }, [lancamentos, selectedYear, currentProperty]);
 
-  const alternarDedutibilidadeDireto = async (
-    lancamento: Lancamento,
-    e: React.MouseEvent,
-  ) => {
-    e.stopPropagation();
-    if (lancamento.origem !== "NFE") return;
-    const idReal = lancamento.id.replace("NFE-", "");
-    setIsLoading(true);
-    try {
-      const token = localStorage.getItem("@AgroPops:token");
-      await fetch(`${baseUrl}/notas/item/${idReal}/toggle-dedutibilidade`, {
-        method: "PUT",
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      buscarLancamentos();
-    } catch (error) {
-      console.error(error);
-    } finally {
-      setIsLoading(false);
-    }
-  };
+  // Totalizador Anual
+  const totaisAno = useMemo(() => {
+    return dadosPorMes.reduce(
+      (acc, mes) => {
+        acc.entradas += mes.totalEntradas;
+        acc.dedutiveis += mes.totalDedutivel;
+        return acc;
+      },
+      { entradas: 0, dedutiveis: 0 },
+    );
+  }, [dadosPorMes]);
+  const saldoAnual = totaisAno.entradas - totaisAno.dedutiveis;
 
   const abrirNotaVinculada = async (notaId?: number, preserveTab = false) => {
     if (!notaId) return;
@@ -504,9 +510,9 @@ export function LivroCaixa() {
   const handleSalvarAvulso = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!currentProducer) return;
-    if (!formData.documento || !formData.historico || !formData.valor) {
+    if (!formData.historico || !formData.valor) {
       setFeedback({
-        text: "Por favor, preencha Documento, Histórico e Valor.",
+        text: "Por favor, preencha o Histórico e o Valor.",
         type: "error",
       });
       return;
@@ -600,6 +606,37 @@ export function LivroCaixa() {
       else alert("Erro ao excluir o lançamento.");
     } catch (error) {
       console.error(error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // FUNÇÃO: EXCLUIR NOTA FISCAL
+  const excluirNota = async (notaId: number) => {
+    if (
+      !window.confirm(
+        "Atenção: Deseja realmente excluir esta nota? A ação é irreversível.",
+      )
+    )
+      return;
+
+    setIsLoading(true);
+    try {
+      const token = localStorage.getItem("@AgroPops:token");
+      const response = await fetch(`${baseUrl}/notas/deletar/${notaId}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      if (response.ok) {
+        setSelectedNotaModal(null);
+        buscarLancamentos();
+      } else {
+        alert("Erro ao excluir a nota fiscal.");
+      }
+    } catch (error) {
+      console.error(error);
+      alert("Erro de comunicação com o servidor.");
     } finally {
       setIsLoading(false);
     }
@@ -718,9 +755,9 @@ export function LivroCaixa() {
         <div className="grid grid-cols-12 bg-gray-100 border-b border-gray-300 py-3 px-4 text-[13px] font-black text-gray-600 uppercase tracking-wider">
           <div className="col-span-4">Mês de Apuração</div>
           <div className="col-span-2 text-right">Entradas (Receitas)</div>
-          <div className="col-span-2 text-right">Saídas (Despesas)</div>
-          <div className="col-span-2 text-right">Dedutível (LCDPR)</div>
+          <div className="col-span-2 text-right">Dedutível (LCDPR) Saídas</div>
           <div className="col-span-2 text-right">Saldo do Mês</div>
+          <div className="col-span-2 text-right">Saldo Acumulado</div>
         </div>
 
         <div className="divide-y divide-gray-200">
@@ -751,19 +788,21 @@ export function LivroCaixa() {
                       </span>
                     )}
                   </div>
-                  <div className="col-span-2 text-right font-mono text-gray-700">
+                  <div className="col-span-2 text-right font-mono text-blue-700 font-medium">
                     {formatBRL(mesDados.totalEntradas)}
                   </div>
-                  <div className="col-span-2 text-right font-mono text-gray-700">
-                    {formatBRL(mesDados.totalSaidas)}
-                  </div>
-                  <div className="col-span-2 text-right font-mono font-bold text-emerald-600">
+                  <div className="col-span-2 text-right font-mono font-bold text-rose-600">
                     {formatBRL(mesDados.totalDedutivel)}
                   </div>
                   <div
-                    className={`col-span-2 text-right font-mono font-bold ${saldoMes < 0 ? "text-rose-600" : "text-blue-600"}`}
+                    className={`col-span-2 text-right font-mono font-bold ${mesDados.saldoMes < 0 ? "text-rose-600" : "text-emerald-600"}`}
                   >
-                    {formatBRL(saldoMes)}
+                    {formatBRL(mesDados.saldoMes)}
+                  </div>
+                  <div
+                    className={`col-span-2 text-right font-mono font-black ${mesDados.saldoAcumulado < 0 ? "text-rose-700" : "text-emerald-700"}`}
+                  >
+                    {formatBRL(mesDados.saldoAcumulado)}
                   </div>
                 </button>
 
@@ -776,20 +815,15 @@ export function LivroCaixa() {
                           <th className="w-32">Documento</th>
                           <th>Histórico do Lançamento</th>
                           <th className="w-24 text-center">Origem</th>
-                          <th className="w-24 text-center">Lançar?</th>
+                          <th className="w-32 text-center">Classificação</th>
                           <th className="w-32 text-right">Entrada</th>
-                          <th className="w-32 text-right">Saída</th>
+                          <th className="w-32 text-right">Saída Dedutível</th>
                           <th className="w-12 text-center">Ações</th>
                         </tr>
                       </thead>
-                      <tbody>
+                      <tbody className="divide-y divide-gray-100">
                         {mesDados.lancamentos.map((lanc) => {
                           const isDevolucao = lanc.valor < 0;
-                          const valorAbsoluto = Math.abs(lanc.valor);
-                          const historicoLimpo = lanc.historico.replace(
-                            /Parc\s(\d+)\/\d+\s-/,
-                            "Parc $1 -",
-                          );
 
                           return (
                             <tr
@@ -797,21 +831,28 @@ export function LivroCaixa() {
                               onClick={() => abrirNotaVinculada(lanc.notaId)}
                               className={`border-b border-gray-200 [&_td]:border-r [&_td]:border-gray-200 [&_td]:px-3 [&_td]:py-1.5 text-gray-700 transition-colors ${lanc.origem === "NFE" ? "hover:bg-blue-50/50 cursor-pointer" : "hover:bg-yellow-50/50"}`}
                             >
+                              {/* 1. Data */}
                               <td className="font-mono text-xs">
                                 {formatDate(lanc.data)}
                               </td>
+
+                              {/* 2. Documento */}
                               <td
                                 className="font-mono text-xs truncate max-w-[120px]"
                                 title={lanc.documento}
                               >
                                 {lanc.documento}
                               </td>
+
+                              {/* 3. Histórico (Exibe a parcela correta: 002/8) */}
                               <td
                                 className="truncate max-w-[250px]"
-                                title={historicoLimpo}
+                                title={lanc.historico}
                               >
-                                {historicoLimpo}
+                                {lanc.historico}
                               </td>
+
+                              {/* 4. Origem */}
                               <td className="text-center">
                                 <span
                                   className={`text-[10px] font-bold px-2 py-0.5 rounded tracking-wide ${lanc.origem === "NFE" ? "bg-blue-100 text-blue-700" : lanc.origem === "SISTEMA" ? "bg-amber-100 text-amber-700 border border-amber-200" : "bg-purple-100 text-purple-700"}`}
@@ -819,31 +860,37 @@ export function LivroCaixa() {
                                   {lanc.origem}
                                 </span>
                               </td>
+
+                              {/* 5. Classificação (%) */}
                               <td className="text-center">
                                 {lanc.tipo === "SAIDA" ? (
-                                  lanc.origem === "NFE" ? (
-                                    <button
-                                      onClick={(e) =>
-                                        alternarDedutibilidadeDireto(lanc, e)
-                                      }
-                                      title="Clique para alternar o status da nota inteira"
-                                      className={`text-[10px] font-bold px-2 py-0.5 rounded transition-transform hover:scale-105 active:scale-95 ${lanc.isDedutivel ? "bg-emerald-100 text-emerald-700 hover:bg-emerald-200" : "bg-rose-100 text-rose-700 hover:bg-rose-200"}`}
-                                    >
-                                      {lanc.isDedutivel
-                                        ? "SIM (Alterar)"
-                                        : "NÃO (Alterar)"}
-                                    </button>
-                                  ) : (
-                                    <span
-                                      className={`text-[10px] font-bold px-2 py-0.5 rounded ${lanc.isDedutivel ? "bg-emerald-100 text-emerald-700" : "bg-rose-100 text-rose-700"}`}
-                                    >
-                                      {lanc.isDedutivel ? "SIM" : "NÃO"}
-                                    </span>
-                                  )
+                                  <span
+                                    title={
+                                      lanc.percDedutivel < 100 &&
+                                      lanc.percDedutivel > 0
+                                        ? `Valor da parcela reduzido. Apenas ${lanc.percDedutivel}% da nota possui itens dedutíveis no LCDPR.`
+                                        : "Percentual de dedutibilidade da nota."
+                                    }
+                                    className={`text-[10px] font-bold px-2.5 py-1 rounded cursor-help transition-all ${
+                                      lanc.percDedutivel === 100
+                                        ? "bg-emerald-100 text-emerald-700"
+                                        : lanc.percDedutivel === 0
+                                          ? "bg-rose-100 text-rose-700"
+                                          : "bg-amber-100 text-amber-700 border border-amber-200"
+                                    }`}
+                                  >
+                                    {lanc.percDedutivel === 100
+                                      ? "SIM (100%)"
+                                      : lanc.percDedutivel === 0
+                                        ? "NÃO LANÇADO"
+                                        : `PARCIAL (${lanc.percDedutivel}%)`}
+                                  </span>
                                 ) : (
                                   <span className="text-gray-400">-</span>
                                 )}
                               </td>
+
+                              {/* 6. Entrada */}
                               <td className="text-right font-mono">
                                 {lanc.tipo === "ENTRADA" ? (
                                   isDevolucao ? (
@@ -852,7 +899,7 @@ export function LivroCaixa() {
                                       title="Estorno/Devolução"
                                     >
                                       <RotateCcw size={12} strokeWidth={3} />{" "}
-                                      {formatBRL(valorAbsoluto)}
+                                      {formatBRL(Math.abs(lanc.valor))}
                                     </span>
                                   ) : (
                                     <span className="text-blue-600 font-medium">
@@ -863,6 +910,8 @@ export function LivroCaixa() {
                                   ""
                                 )}
                               </td>
+
+                              {/* 7. Saída Dedutível */}
                               <td className="text-right font-mono">
                                 {lanc.tipo === "SAIDA" ? (
                                   isDevolucao ? (
@@ -871,17 +920,19 @@ export function LivroCaixa() {
                                       title="Estorno/Devolução"
                                     >
                                       <RotateCcw size={12} strokeWidth={3} />{" "}
-                                      {formatBRL(valorAbsoluto)}
+                                      {formatBRL(Math.abs(lanc.valorDedutivel))}
                                     </span>
                                   ) : (
                                     <span className="text-rose-600 font-medium">
-                                      {formatBRL(lanc.valor)}
+                                      {formatBRL(lanc.valorDedutivel)}
                                     </span>
                                   )
                                 ) : (
                                   ""
                                 )}
                               </td>
+
+                              {/* 8. Ações */}
                               <td className="text-center">
                                 {lanc.origem === "AVULSO" ? (
                                   <button
@@ -913,6 +964,25 @@ export function LivroCaixa() {
               </div>
             );
           })}
+        </div>
+        {/* SOMATÓRIA ANUAL DO LIVRO CAIXA */}
+        <div className="grid grid-cols-12 bg-white border-t-2 border-gray-300 py-4 px-4 text-sm tracking-wider items-center shadow-sm">
+          <div className="col-span-4 font-black uppercase flex items-center gap-2 text-gray-800">
+            <CalendarDays size={18} className="text-agro-secondary" /> Somatória
+            Anual ({selectedYear})
+          </div>
+          <div className="col-span-2 text-right font-mono font-bold text-blue-700">
+            {formatBRL(totaisAno.entradas)}
+          </div>
+          <div className="col-span-2 text-right font-mono font-bold text-rose-600">
+            {formatBRL(totaisAno.dedutiveis)}
+          </div>
+          <div className="col-span-2 text-right font-mono text-gray-400">-</div>
+          <div
+            className={`col-span-2 text-right font-mono font-black text-lg ${saldoAnual < 0 ? "text-rose-600" : "text-emerald-600"}`}
+          >
+            {formatBRL(saldoAnual)}
+          </div>
         </div>
       </div>
 
@@ -983,130 +1053,19 @@ export function LivroCaixa() {
                   RECEITA (Entrada)
                 </button>
               </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-1">
-                  <label className="text-xs font-bold text-gray-600 uppercase">
-                    Data da Operação
-                  </label>
-                  <input
-                    type="date"
-                    required
-                    value={formData.data}
-                    onChange={(e) =>
-                      setFormData((p) => ({ ...p, data: e.target.value }))
-                    }
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg outline-none text-sm focus:border-agro-secondary"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-xs font-bold text-gray-600 uppercase">
-                    Tipo de Documento
-                  </label>
-                  <select
-                    value={formData.tipoDocumento}
-                    onChange={(e) =>
-                      setFormData((p) => ({
-                        ...p,
-                        tipoDocumento: e.target.value,
-                      }))
-                    }
-                    className="w-full px-3 py-2 border border-gray-300 bg-white rounded-lg outline-none text-sm focus:border-agro-secondary font-medium text-gray-700"
-                  >
-                    {TIPOS_DOCUMENTO.map((t) => (
-                      <option key={t.id} value={t.id}>
-                        {t.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-              <div className="grid grid-cols-1 gap-4 relative">
-                <div className="space-y-1 relative">
-                  <label className="text-xs font-bold text-gray-600 uppercase">
-                    Empresa / Favorecido (Pesquise ou Digite)
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    placeholder="Ex: Agro Loja S/A"
-                    value={formData.nomeParticipante}
-                    onFocus={() => setShowSuggestions(true)}
-                    onBlur={() =>
-                      setTimeout(() => setShowSuggestions(false), 200)
-                    }
-                    onChange={(e) => {
-                      setFormData((p) => ({
-                        ...p,
-                        nomeParticipante: e.target.value,
-                      }));
-                      setShowSuggestions(true);
-                    }}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg outline-none text-sm focus:border-agro-secondary"
-                  />
-                  {showSuggestions && fornecedoresFiltrados.length > 0 && (
-                    <ul className="absolute z-50 left-0 right-0 top-16 bg-white border border-gray-200 rounded-xl shadow-xl max-h-48 overflow-y-auto divide-y divide-gray-100">
-                      {fornecedoresFiltrados.map((f) => (
-                        <li
-                          key={f.id}
-                          className="px-4 py-2.5 hover:bg-emerald-50 cursor-pointer flex justify-between items-center transition-colors"
-                          onClick={() => {
-                            setFormData((p) => ({
-                              ...p,
-                              nomeParticipante: f.nome,
-                              cpfCnpjParticipante:
-                                f.cpfCnpj || p.cpfCnpjParticipante,
-                              historico: `Pgto para ${f.nome} - `,
-                            }));
-                            setShowSuggestions(false);
-                          }}
-                        >
-                          <span className="text-sm font-bold text-gray-800">
-                            {f.nome}
-                          </span>
-                          {f.cpfCnpj && (
-                            <span className="text-xs font-mono text-gray-400">
-                              {f.cpfCnpj}
-                            </span>
-                          )}
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-1">
-                  <label className="text-xs font-bold text-gray-600 uppercase">
-                    Número do Documento
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    placeholder="Ex: Recibo 45"
-                    value={formData.documento}
-                    onChange={(e) =>
-                      setFormData((p) => ({ ...p, documento: e.target.value }))
-                    }
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg outline-none text-sm focus:border-agro-secondary"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-xs font-bold text-gray-600 uppercase">
-                    CPF / CNPJ do Favorecido
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="Apenas números (Opcional)"
-                    value={formData.cpfCnpjParticipante}
-                    onChange={(e) =>
-                      setFormData((p) => ({
-                        ...p,
-                        cpfCnpjParticipante: e.target.value.replace(/\D/g, ""),
-                      }))
-                    }
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg outline-none text-sm focus:border-agro-secondary font-mono"
-                  />
-                </div>
+              <div className="space-y-1">
+                <label className="text-xs font-bold text-gray-600 uppercase">
+                  Data da Operação
+                </label>
+                <input
+                  type="date"
+                  required
+                  value={formData.data}
+                  onChange={(e) =>
+                    setFormData((p) => ({ ...p, data: e.target.value }))
+                  }
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg outline-none text-sm focus:border-agro-secondary"
+                />
               </div>
               <div className="space-y-1">
                 <label className="text-xs font-bold text-gray-600 uppercase">
@@ -1115,7 +1074,7 @@ export function LivroCaixa() {
                 <input
                   type="text"
                   required
-                  placeholder="Ex: Pagamento folha de salários"
+                  placeholder="Ex: Compensação de Prejuízo, Acerto de Juros..."
                   value={formData.historico}
                   onChange={(e) =>
                     setFormData((p) => ({ ...p, historico: e.target.value }))
@@ -1141,19 +1100,6 @@ export function LivroCaixa() {
                     }
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg outline-none text-sm font-mono font-bold focus:border-agro-secondary text-right text-gray-800"
                   />
-                  <div className="flex items-center justify-end gap-1 pt-1">
-                    <p className="text-[10px] text-gray-400">
-                      Pode usar sinal - para estornos.
-                    </p>
-                    <button
-                      type="button"
-                      onClick={() => setShowInfoEstorno(!showInfoEstorno)}
-                      className="text-gray-400 hover:text-sky-600 transition-colors focus:outline-none"
-                      title="Como lançar devoluções"
-                    >
-                      <Info size={14} />
-                    </button>
-                  </div>
                 </div>
                 {formData.tipo === "SAIDA" ? (
                   <div className="pt-6">
@@ -1182,28 +1128,6 @@ export function LivroCaixa() {
                 ) : (
                   <div className="pt-6 text-xs text-gray-400 font-medium italic">
                     * Receitas entram 100% no bruto.
-                  </div>
-                )}
-                {showInfoEstorno && (
-                  <div className="col-span-2 p-3 mt-1 bg-sky-50 border border-sky-100 rounded-lg text-xs text-sky-800 leading-relaxed shadow-inner">
-                    <p className="mb-2">
-                      <strong>
-                        Se o produtor devolve dinheiro ao cliente (Anular
-                        Venda):
-                      </strong>{" "}
-                      Lance como <strong>ENTRADA</strong> e coloque o valor
-                      negativo (ex: -10.000). O sistema entende que ele
-                      "desfaturou" esse valor, reduzindo a Receita Bruta.
-                    </p>
-                    <p>
-                      <strong>
-                        Se o fornecedor devolve o dinheiro ao produtor (Anular
-                        Compra):
-                      </strong>{" "}
-                      Lance como <strong>SAÍDA</strong> e coloque o valor
-                      negativo (ex: -5.000). O sistema entende que aquela
-                      despesa não existe mais, reduzindo as Despesas Dedutíveis.
-                    </p>
                   </div>
                 )}
               </div>
@@ -1236,27 +1160,126 @@ export function LivroCaixa() {
       {selectedNotaModal && (
         <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-6xl overflow-hidden flex flex-col max-h-[90vh]">
+            {/* CABEÇALHO DO MODAL */}
             <div className="p-6 border-b border-gray-100 flex items-center justify-between bg-gray-50">
               <div className="flex items-center gap-4">
+                <div className="w-12 h-12 bg-agro-secondary/10 text-agro-secondary rounded-xl flex items-center justify-center shrink-0 shadow-inner border border-emerald-100">
+                  <FileText size={24} />
+                </div>
                 <div>
                   <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2">
-                    <FileText className="text-agro-secondary" /> Nota Fiscal Nº{" "}
-                    {selectedNotaModal.numero}
+                    Nota Fiscal Nº {selectedNotaModal.numero}
                   </h2>
-                  <p className="text-sm text-gray-500 mt-1">
-                    {selectedNotaModal.empresaEnvolvida} • Emissão:{" "}
-                    {formatDate(selectedNotaModal.dataEmissao)}
-                  </p>
+                  <div className="flex items-center gap-2 mt-1.5">
+                    <span
+                      onClick={() => {
+                        if (selectedNotaModal.chaveAcesso)
+                          navigator.clipboard.writeText(
+                            selectedNotaModal.chaveAcesso,
+                          );
+                      }}
+                      className="text-[11px] font-mono bg-white border border-gray-200 text-gray-600 px-2.5 py-1 rounded-md cursor-pointer hover:bg-gray-100 hover:text-gray-800 transition-colors flex items-center gap-1.5 shadow-sm"
+                      title="Clique para copiar a chave"
+                    >
+                      <Copy size={12} />{" "}
+                      {selectedNotaModal.chaveAcesso ||
+                        "Lançamento Manual (Sem Chave)"}
+                    </span>
+                    {selectedNotaModal.chaveAcesso && (
+                      <a
+                        href="https://www.nfe.fazenda.gov.br/portal/consultaRecaptcha.aspx?tipoConsulta=resumo&tipoConteudo=7PhJ+gAVw2g="
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-white bg-agro-secondary hover:bg-agro-primary px-2 py-1 rounded-md transition-colors shadow-sm flex items-center gap-1 text-[11px] font-bold"
+                        title="Ir para o Portal Nacional (A chave já está na sua área de transferência)"
+                      >
+                        Portal Nacional <ExternalLink size={12} />
+                      </a>
+                    )}
+                  </div>
                 </div>
               </div>
               <button
                 onClick={() => setSelectedNotaModal(null)}
-                className="p-2 hover:bg-gray-200 rounded-lg text-gray-400"
+                className="p-2 hover:bg-gray-200 rounded-lg text-gray-400 self-start"
               >
                 <X size={20} />
               </button>
             </div>
 
+            {/* BARRA DE INFORMAÇÕES DETALHADAS */}
+            <div className="px-6 py-4 bg-white border-b border-gray-100 flex flex-col gap-4 text-sm">
+              <div className="flex flex-wrap gap-6">
+                <div className="flex-1 min-w-[200px]">
+                  <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-0.5">
+                    Emitente (Origem)
+                  </p>
+                  <p
+                    className="font-semibold text-gray-800 truncate"
+                    title={
+                      selectedNotaModal.nomeEmitente ||
+                      selectedNotaModal.empresaEnvolvida
+                    }
+                  >
+                    {selectedNotaModal.nomeEmitente ||
+                      selectedNotaModal.empresaEnvolvida}
+                  </p>
+                </div>
+                <div className="flex-1 min-w-[200px]">
+                  <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-0.5">
+                    Destinatário (Destino)
+                  </p>
+                  <p
+                    className="font-semibold text-gray-800 truncate"
+                    title={
+                      selectedNotaModal.nomeDestinatario ||
+                      selectedNotaModal.empresaEnvolvida
+                    }
+                  >
+                    {selectedNotaModal.nomeDestinatario ||
+                      selectedNotaModal.empresaEnvolvida}
+                  </p>
+                </div>
+                <div className="flex-1 min-w-[200px]">
+                  <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-0.5">
+                    Natureza da Operação
+                  </p>
+                  <p
+                    className="font-semibold text-gray-800 truncate"
+                    title={
+                      selectedNotaModal.naturezaOperacao || "Não informada"
+                    }
+                  >
+                    {selectedNotaModal.naturezaOperacao || "Não informada"}
+                  </p>
+                </div>
+                <div className="flex-1 min-w-[120px]">
+                  <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-0.5">
+                    Data Emissão
+                  </p>
+                  <p className="font-semibold text-gray-800">
+                    {formatDate(selectedNotaModal.dataEmissao)}
+                  </p>
+                </div>
+              </div>
+
+              {selectedNotaModal.chaveAcessoReferencia && (
+                <div className="p-2.5 bg-sky-50 border border-sky-100 rounded-lg flex items-center gap-2 w-fit pr-6">
+                  <RotateCcw size={16} className="text-sky-600 shrink-0" />
+                  <div>
+                    <p className="text-xs font-bold text-sky-800">
+                      Nota de Devolução (Contra-Nota)
+                    </p>
+                    <p className="text-[10px] text-sky-600 font-mono mt-0.5">
+                      Referente à Chave:{" "}
+                      {selectedNotaModal.chaveAcessoReferencia}
+                    </p>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* ABAS */}
             <div className="flex px-6 bg-gray-50 border-b border-gray-100 pt-2">
               <button
                 onClick={() => setActiveTabModal("itens")}

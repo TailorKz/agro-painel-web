@@ -25,7 +25,7 @@ export function RegrasGlobaisSaaS() {
   const [feedback, setFeedback] = useState({ text: "", type: "" });
 
   const [formRegra, setFormRegra] = useState({
-    tipo: "CFOP",
+    tipo: "NCM",
     codigo: "",
     descricao: "",
     isDedutivel: true,
@@ -153,9 +153,8 @@ export function RegrasGlobaisSaaS() {
       <div className="bg-blue-50 border border-blue-100 p-5 rounded-2xl flex items-start gap-3">
         <Info className="text-blue-600 shrink-0 mt-0.5" size={20} />
         <div className="text-sm text-blue-800 leading-relaxed">
-            As regras cadastradas aqui são
-          injetadas no banco geral. Quando o contador
-          importar um XML, o sistema usará essas diretrizes para
+          As regras cadastradas aqui são injetadas no banco geral. Quando o
+          contador importar um XML, o sistema usará essas diretrizes para
           sugerir se a nota abate imposto ou não no LCDPR.
         </div>
       </div>
