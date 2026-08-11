@@ -180,6 +180,15 @@ export function NotasFiscais() {
   const { currentProducer, currentProperty } = useProducer();
   const location = useLocation();
 
+  const [divergentes, setDivergentes] = useState<any[]>([]);
+  const [arquivosDivergentesMap, setArquivosDivergentesMap] = useState<
+    Map<string, File>
+  >(new Map());
+  const [selectedDivergentes, setSelectedDivergentes] = useState<Set<string>>(
+    new Set(),
+  );
+  const [showDivergentesModal, setShowDivergentesModal] = useState(false);
+
   const abaInicial = location.state?.abaInicial || "todas";
   const periodoInicial =
     location.state?.periodoInicial || new Date().getFullYear();
@@ -511,26 +520,38 @@ export function NotasFiscais() {
       setSelectedFiles((prev) => [...prev, ...Array.from(e.target.files!)]);
   };
 
-  const handleUploadXMLs = async () => {
-    if (selectedFiles.length === 0 || !currentProducer) return;
-    setIsUploading(true);
-    setUploadMessage({ text: "Preparando envio em lotes...", type: "success" });
+  const handleUploadXMLs = async (
+    forcarArquivos?: File[] | React.MouseEvent | any,
+  ) => {
+    // BLINDAGEM: Se forcarArquivos for um Evento de Mouse, ignoramos. Só forçamos se for um Array real!
+    const isForcando = Array.isArray(forcarArquivos);
+    const arquivosParaEnviar = isForcando ? forcarArquivos : selectedFiles;
 
+    if (arquivosParaEnviar.length === 0 || !currentProducer) return;
+
+    setIsUploading(true);
+    setUploadMessage({ text: "Processando notas...", type: "success" });
     const token = localStorage.getItem("@AgroPops:token");
+
     let totalImportadas = 0;
     let totalIgnoradas = 0;
     let totalFalhas = 0;
+    let todasDivergentes: any[] = [];
+    let mapaArquivosOriginais = new Map(arquivosDivergentesMap);
 
     const tamanhoLote = 20;
-
-    for (let i = 0; i < selectedFiles.length; i += tamanhoLote) {
-      const lote = selectedFiles.slice(i, i + tamanhoLote);
+    for (let i = 0; i < arquivosParaEnviar.length; i += tamanhoLote) {
+      const lote = arquivosParaEnviar.slice(i, i + tamanhoLote);
       const formData = new FormData();
-      lote.forEach((file) => formData.append("arquivos", file));
 
-      if (currentProperty) {
+      lote.forEach((file) => {
+        formData.append("arquivos", file);
+        if (!isForcando) mapaArquivosOriginais.set(file.name, file);
+      });
+
+      if (currentProperty)
         formData.append("propriedadeFallbackId", currentProperty.id.toString());
-      }
+      if (isForcando) formData.append("forcar", "true"); // Ativa a flag no Java
 
       try {
         const response = await fetch(
@@ -543,15 +564,13 @@ export function NotasFiscais() {
         );
 
         if (response.ok) {
-          const msgBackend = await response.text();
-
-          const matchImportadas = msgBackend.match(/(\d+)\snotas\simportadas/);
-          const matchIgnoradas = msgBackend.match(/(\d+)\signoradas/);
-          const matchFalhas = msgBackend.match(/(\d+)\sfalharam/);
-
-          if (matchImportadas) totalImportadas += parseInt(matchImportadas[1]);
-          if (matchIgnoradas) totalIgnoradas += parseInt(matchIgnoradas[1]);
-          if (matchFalhas) totalFalhas += parseInt(matchFalhas[1]);
+          const result = await response.json();
+          totalImportadas += result.importadas;
+          totalIgnoradas += result.ignoradas;
+          totalFalhas += result.falhas;
+          if (result.divergentes && result.divergentes.length > 0) {
+            todasDivergentes.push(...result.divergentes);
+          }
         } else {
           totalFalhas += lote.length;
         }
@@ -560,31 +579,43 @@ export function NotasFiscais() {
       }
 
       const loteAtual = Math.ceil((i + 1) / tamanhoLote);
-      const totalLotes = Math.ceil(selectedFiles.length / tamanhoLote);
+      const totalLotes = Math.ceil(arquivosParaEnviar.length / tamanhoLote);
       setUploadMessage({
         text: `Processando lote ${loteAtual} de ${totalLotes}...`,
         type: "success",
       });
     }
 
-    let msgFinal = `Concluído: ${totalImportadas} notas importadas.`;
+    // Processamento concluído
+    setArquivosDivergentesMap(mapaArquivosOriginais);
+
+    // Se a importação normal achou divergências, abrimos o modal
+    if (todasDivergentes.length > 0 && !isForcando) {
+      setDivergentes(todasDivergentes);
+      setIsImportModalOpen(false);
+      setShowDivergentesModal(true);
+      setIsUploading(false);
+      return; // Interrompe para o contador decidir
+    }
+
+    // Se chegou aqui, é porque forçou ou não houve divergências
+    let msgFinal = `Concluído: ${totalImportadas} importadas.`;
     if (totalIgnoradas > 0)
       msgFinal += ` ${totalIgnoradas} ignoradas (já existiam).`;
-    if (totalFalhas > 0) msgFinal += ` ${totalFalhas} falharam (inválido).`;
+    if (totalFalhas > 0) msgFinal += ` ${totalFalhas} falhas.`;
 
     setUploadMessage({
       text: msgFinal,
-      type:
-        totalImportadas > 0
-          ? "success"
-          : totalIgnoradas > 0
-            ? "success"
-            : "error",
+      type: totalImportadas > 0 ? "success" : "error",
     });
 
     setTimeout(() => {
       setIsImportModalOpen(false);
+      setShowDivergentesModal(false);
       setSelectedFiles([]);
+      setDivergentes([]);
+      setSelectedDivergentes(new Set());
+      setArquivosDivergentesMap(new Map());
       buscarNotas();
     }, 3500);
 
@@ -679,7 +710,7 @@ export function NotasFiscais() {
     if (selectedNotaModal.parcelas && selectedNotaModal.parcelas.length > 0) {
       if (Math.abs(somaParcelas - selectedNotaModal.valorTotal) > 0.1) {
         const confirmar = window.confirm(
-          `Atenção: A soma das parcelas (${formatBRL(somaParcelas)}) difere do total da nota (${formatBRL(selectedNotaModal.valorTotal)}).\n\nNo LCDPR (Regime de Caixa), o valor lançado deve ser exatamente o que foi pago ou recebido.\n\nDeseja confirmar e salvar com esta diferença (ex: devido a descontos ou retenções)?`
+          `Atenção: A soma das parcelas (${formatBRL(somaParcelas)}) difere do total da nota (${formatBRL(selectedNotaModal.valorTotal)}).\n\nNo LCDPR (Regime de Caixa), o valor lançado deve ser exatamente o que foi pago ou recebido.\n\nDeseja confirmar e salvar com esta diferença (ex: devido a descontos ou retenções)?`,
         );
         if (!confirmar) return; // Só interrompe se o usuário clicar em "Cancelar"
       }
@@ -816,6 +847,14 @@ export function NotasFiscais() {
     basePercModal > 0 ? (totalDedutivelModal / basePercModal) * 100 : 0;
   const percNaoDedutivelModal =
     basePercModal > 0 ? (totalNaoDedutivelModal / basePercModal) * 100 : 0;
+
+  const forcarImportacaoDivergentes = () => {
+    if (selectedDivergentes.size === 0) return;
+    const arquivosParaForcar = Array.from(selectedDivergentes).map(
+      (nome) => arquivosDivergentesMap.get(nome)!,
+    );
+    handleUploadXMLs(arquivosParaForcar);
+  };
 
   return (
     <div className="space-y-6 pb-10">
@@ -1099,10 +1138,9 @@ export function NotasFiscais() {
       {/* ============================================================== */}
       {/* MODAL: DETALHES DA NOTA (ITENS, PARCELAS E CLASSIFICAÇÃO) */}
       {/* ============================================================== */}
-     {selectedNotaModal && (
+      {selectedNotaModal && (
         <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-6xl overflow-hidden flex flex-col max-h-[90vh]">
-            
             {/* CABEÇALHO DO MODAL */}
             <div className="p-6 border-b border-gray-100 flex items-center justify-between bg-gray-50">
               <div className="flex items-center gap-4">
@@ -1114,21 +1152,25 @@ export function NotasFiscais() {
                     Nota Fiscal Nº {selectedNotaModal.numero}
                   </h2>
                   <div className="flex items-center gap-2 mt-1.5">
-                    <span 
+                    <span
                       onClick={() => {
                         if (selectedNotaModal.chaveAcesso) {
-                          navigator.clipboard.writeText(selectedNotaModal.chaveAcesso);
+                          navigator.clipboard.writeText(
+                            selectedNotaModal.chaveAcesso,
+                          );
                         }
                       }}
                       className="text-[11px] font-mono bg-white border border-gray-200 text-gray-600 px-2.5 py-1 rounded-md cursor-pointer hover:bg-gray-100 hover:text-gray-800 transition-colors flex items-center gap-1.5 shadow-sm"
                       title="Clique para copiar a chave"
                     >
-                      <Copy size={12} /> {selectedNotaModal.chaveAcesso || "Lançamento Manual (Sem Chave)"}
+                      <Copy size={12} />{" "}
+                      {selectedNotaModal.chaveAcesso ||
+                        "Lançamento Manual (Sem Chave)"}
                     </span>
                     {selectedNotaModal.chaveAcesso && (
-                      <a 
+                      <a
                         href="https://www.nfe.fazenda.gov.br/portal/consultaRecaptcha.aspx?tipoConsulta=resumo&tipoConteudo=7PhJ+gAVw2g="
-                        target="_blank" 
+                        target="_blank"
                         rel="noreferrer"
                         className="text-white bg-agro-secondary hover:bg-agro-primary px-2 py-1 rounded-md transition-colors shadow-sm flex items-center gap-1 text-[11px] font-bold"
                         title="Ir para o Portal Nacional (A chave já está na sua área de transferência)"
@@ -1149,42 +1191,74 @@ export function NotasFiscais() {
 
             {/* BARRA DE INFORMAÇÕES DETALHADAS (FONTE DE VERDADE DO XML) */}
             <div className="px-6 py-4 bg-white border-b border-gray-100 flex flex-col gap-4 text-sm">
-               <div className="flex flex-wrap gap-6">
-                 <div className="flex-1 min-w-[200px]">
-                   <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-0.5">Emitente (Origem)</p>
-                   <p className="font-semibold text-gray-800 truncate" title={selectedNotaModal.nomeEmitente || selectedNotaModal.empresaEnvolvida}>
-                      {selectedNotaModal.nomeEmitente || selectedNotaModal.empresaEnvolvida}
-                   </p>
-                 </div>
-                 <div className="flex-1 min-w-[200px]">
-                   <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-0.5">Destinatário (Destino)</p>
-                   <p className="font-semibold text-gray-800 truncate" title={selectedNotaModal.nomeDestinatario || selectedNotaModal.empresaEnvolvida}>
-                      {selectedNotaModal.nomeDestinatario || selectedNotaModal.empresaEnvolvida}
-                   </p>
-                 </div>
-                 <div className="flex-1 min-w-[200px]">
-                   <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-0.5">Natureza da Operação</p>
-                   <p className="font-semibold text-gray-800 truncate" title={selectedNotaModal.naturezaOperacao || "Não informada"}>
-                      {selectedNotaModal.naturezaOperacao || "Não informada"}
-                   </p>
-                 </div>
-                 <div className="flex-1 min-w-[120px]">
-                   <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-0.5">Data Emissão</p>
-                   <p className="font-semibold text-gray-800">
-                      {formatarData(selectedNotaModal.dataEmissao)}
-                   </p>
-                 </div>
-               </div>
-               
-               {selectedNotaModal.chaveAcessoReferencia && (
-                 <div className="p-2.5 bg-sky-50 border border-sky-100 rounded-lg flex items-center gap-2 w-fit pr-6">
-                   <RotateCcw size={16} className="text-sky-600 shrink-0" />
-                   <div>
-                     <p className="text-xs font-bold text-sky-800">Nota de Devolução (Contra-Nota)</p>
-                     <p className="text-[10px] text-sky-600 font-mono mt-0.5">Referente à Chave: {selectedNotaModal.chaveAcessoReferencia}</p>
-                   </div>
-                 </div>
-               )}
+              <div className="flex flex-wrap gap-6">
+                <div className="flex-1 min-w-[200px]">
+                  <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-0.5">
+                    Emitente (Origem)
+                  </p>
+                  <p
+                    className="font-semibold text-gray-800 truncate"
+                    title={
+                      selectedNotaModal.nomeEmitente ||
+                      selectedNotaModal.empresaEnvolvida
+                    }
+                  >
+                    {selectedNotaModal.nomeEmitente ||
+                      selectedNotaModal.empresaEnvolvida}
+                  </p>
+                </div>
+                <div className="flex-1 min-w-[200px]">
+                  <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-0.5">
+                    Destinatário (Destino)
+                  </p>
+                  <p
+                    className="font-semibold text-gray-800 truncate"
+                    title={
+                      selectedNotaModal.nomeDestinatario ||
+                      selectedNotaModal.empresaEnvolvida
+                    }
+                  >
+                    {selectedNotaModal.nomeDestinatario ||
+                      selectedNotaModal.empresaEnvolvida}
+                  </p>
+                </div>
+                <div className="flex-1 min-w-[200px]">
+                  <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-0.5">
+                    Natureza da Operação
+                  </p>
+                  <p
+                    className="font-semibold text-gray-800 truncate"
+                    title={
+                      selectedNotaModal.naturezaOperacao || "Não informada"
+                    }
+                  >
+                    {selectedNotaModal.naturezaOperacao || "Não informada"}
+                  </p>
+                </div>
+                <div className="flex-1 min-w-[120px]">
+                  <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-0.5">
+                    Data Emissão
+                  </p>
+                  <p className="font-semibold text-gray-800">
+                    {formatarData(selectedNotaModal.dataEmissao)}
+                  </p>
+                </div>
+              </div>
+
+              {selectedNotaModal.chaveAcessoReferencia && (
+                <div className="p-2.5 bg-sky-50 border border-sky-100 rounded-lg flex items-center gap-2 w-fit pr-6">
+                  <RotateCcw size={16} className="text-sky-600 shrink-0" />
+                  <div>
+                    <p className="text-xs font-bold text-sky-800">
+                      Nota de Devolução (Contra-Nota)
+                    </p>
+                    <p className="text-[10px] text-sky-600 font-mono mt-0.5">
+                      Referente à Chave:{" "}
+                      {selectedNotaModal.chaveAcessoReferencia}
+                    </p>
+                  </div>
+                </div>
+              )}
             </div>
 
             <div className="flex px-6 bg-gray-50 border-b border-gray-100 pt-2">
@@ -1999,9 +2073,7 @@ export function NotasFiscais() {
         </div>
       )}
 
-      {/* ============================================================== */}
       {/* MODAL: IMPORTAÇÃO (XML) */}
-      {/* ============================================================== */}
       {isImportModalOpen && (
         <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg overflow-hidden flex flex-col max-h-[90vh]">
@@ -2120,6 +2192,104 @@ export function NotasFiscais() {
                   </>
                 ) : (
                   "Iniciar Importação"
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL DE RESOLUÇÃO DE DIVERGÊNCIAS */}
+      {showDivergentesModal && (
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-[60] flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-4xl overflow-hidden flex flex-col max-h-[90vh]">
+            <div className="p-6 border-b border-gray-100 bg-amber-50">
+              <h2 className="text-xl font-bold text-amber-800 flex items-center gap-2">
+                <AlertCircle size={24} /> Atenção: Notas com Divergência de
+                Titularidade
+              </h2>
+              <p className="text-sm text-amber-700 mt-2">
+                Encontramos <b>{divergentes.length}</b> nota(s) onde o CPF/CNPJ
+                do emitente ou destinatário não bate com o produtor atual nem
+                com as propriedades vinculadas a ele. Selecione abaixo quais
+                notas você quer forçar a entrada mesmo assim.
+              </p>
+            </div>
+
+            <div className="p-0 overflow-y-auto flex-1">
+              <table className="w-full text-left border-collapse text-sm">
+                <thead>
+                  <tr className="bg-gray-100 text-gray-600 sticky top-0 shadow-sm">
+                    <th className="px-4 py-3 w-10 text-center">
+                      <input
+                        type="checkbox"
+                        onChange={(e) => {
+                          if (e.target.checked)
+                            setSelectedDivergentes(
+                              new Set(divergentes.map((d) => d.nomeArquivo)),
+                            );
+                          else setSelectedDivergentes(new Set());
+                        }}
+                        className="rounded text-agro-secondary"
+                      />
+                    </th>
+                    <th className="px-4 py-3 font-medium">Nome do Arquivo</th>
+                    <th className="px-4 py-3 font-medium">Emitente</th>
+                    <th className="px-4 py-3 font-medium">Destinatário</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {divergentes.map((div, i) => (
+                    <tr key={i} className="hover:bg-gray-50">
+                      <td className="px-4 py-3 text-center">
+                        <input
+                          type="checkbox"
+                          checked={selectedDivergentes.has(div.nomeArquivo)}
+                          onChange={(e) => {
+                            const next = new Set(selectedDivergentes);
+                            if (e.target.checked) next.add(div.nomeArquivo);
+                            else next.delete(div.nomeArquivo);
+                            setSelectedDivergentes(next);
+                          }}
+                          className="rounded text-agro-secondary"
+                        />
+                      </td>
+                      <td className="px-4 py-3 font-mono text-xs text-gray-500">
+                        {div.nomeArquivo}
+                      </td>
+                      <td className="px-4 py-3 font-semibold text-gray-800">
+                        {div.emitente}
+                      </td>
+                      <td className="px-4 py-3 font-semibold text-gray-800">
+                        {div.destinatario}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="p-6 border-t border-gray-100 bg-gray-50 flex items-center justify-between">
+              <button
+                onClick={() => {
+                  setShowDivergentesModal(false);
+                  setDivergentes([]);
+                  setSelectedFiles([]);
+                  buscarNotas(); // Fecha e ignora todas
+                }}
+                className="px-5 py-2.5 text-sm font-medium text-gray-600 hover:bg-gray-200 rounded-xl"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={forcarImportacaoDivergentes}
+                disabled={selectedDivergentes.size === 0 || isUploading}
+                className="px-6 py-2.5 text-sm font-bold text-white bg-amber-600 hover:bg-amber-700 rounded-xl shadow-sm flex items-center gap-2 disabled:opacity-50"
+              >
+                {isUploading ? (
+                  <Loader2 size={16} className="animate-spin" />
+                ) : (
+                  "Importar as Selecionadas (" + selectedDivergentes.size + ")"
                 )}
               </button>
             </div>

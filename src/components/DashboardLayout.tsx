@@ -1,4 +1,4 @@
-import { Outlet, NavLink, useNavigate } from "react-router-dom";
+import { Outlet, NavLink, useNavigate, useLocation } from "react-router-dom";
 import { useEffect, useState } from "react";
 import { useProducer } from "../context/ProducerContext";
 import {
@@ -13,6 +13,10 @@ import {
   Tractor,
   BookText,
   ShieldAlert,
+  Search,
+  X,
+  Building2,
+  ChevronRight,
 } from "lucide-react";
 
 export function DashboardLayout() {
@@ -30,6 +34,35 @@ export function DashboardLayout() {
   );
 
   const adminBackupToken = localStorage.getItem("@AgroPops:adminBackupToken");
+
+  const location = useLocation();
+
+  // --- ESTADOS DA MODAL DE PRODUTORES PADRÃO OURO ---
+  const [isProducerModalOpen, setIsProducerModalOpen] = useState(false);
+  const [producerSearchTerm, setProducerSearchTerm] = useState("");
+
+  const maskCpfCnpj = (v: string) => {
+    if (!v) return "";
+    v = v.replace(/\D/g, "");
+    if (v.length <= 11)
+      return v.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, "$1.$2.$3-$4");
+    return v.replace(/(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})/, "$1.$2.$3/$4-$5");
+  };
+
+  const filteredProducers = producersList.filter((p: any) => {
+    if (!producerSearchTerm) return true;
+    const term = producerSearchTerm.toLowerCase();
+    const name = (p.nome || p.name || "").toLowerCase();
+    const doc = (p.cpfCnpj || p.document || "").replace(/\D/g, "");
+    const searchDoc = producerSearchTerm.replace(/\D/g, "");
+    return name.includes(term) || (searchDoc && doc.includes(searchDoc));
+  });
+
+  // Identifica se a tela atual NÃO precisa de um produtor selecionado
+  const isGlobalRoute =
+    location.pathname.includes("/produtores") ||
+    location.pathname.includes("/parametrizacao") ||
+    location.pathname.includes("/configuracoes");
 
   useEffect(() => {
     // Busca a credencial real armazenada no navegador (Sem forçar tipagem)
@@ -243,36 +276,32 @@ export function DashboardLayout() {
         <header className="h-20 bg-white border-b border-gray-100 flex items-center justify-between px-8 shadow-sm z-10 shrink-0">
           {userRole === "CONTADOR" ? (
             <div className="flex items-center gap-4">
+              {/* BOTÃO DA MODAL DE SELEÇÃO */}
               <div className="relative group">
-                <label className="absolute -top-2 left-3 bg-white px-1 text-[10px] font-bold text-agro-secondary uppercase">
-                  Visualizando Dados De:
+                <label className="absolute -top-2 left-3 bg-white px-1 text-[10px] font-bold text-agro-secondary uppercase z-10">
+                  Carteira Ativa
                 </label>
-                <div className="flex items-center gap-2 border-2 border-gray-200 rounded-xl px-4 py-2.5 bg-gray-50/50 hover:border-agro-secondary cursor-pointer transition-colors min-w-[320px]">
-                  <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                  <select
-                    className="flex-1 bg-transparent text-sm font-bold text-gray-800 outline-none cursor-pointer appearance-none pr-6"
-                    value={currentProducer?.id || ""}
-                    onChange={(e) => {
-                      const selected = producersList.find(
-                        (p) => p.id === e.target.value,
-                      );
-                      setCurrentProducer(selected || null);
-                    }}
-                  >
-                    <option value="" disabled>
-                      Selecione um produtor...
-                    </option>
-                    {producersList.map((producer) => (
-                      <option key={producer.id} value={producer.id}>
-                        {producer.name}
-                      </option>
-                    ))}
-                  </select>
-                  <ChevronDown
+                <button
+                  onClick={() => setIsProducerModalOpen(true)}
+                  className="flex items-center justify-between gap-3 border-2 border-gray-200 rounded-xl px-4 py-2.5 bg-gray-50/50 hover:border-agro-secondary hover:bg-white cursor-pointer transition-all min-w-[320px] text-left group-hover:shadow-sm"
+                >
+                  <div className="flex items-center gap-2.5">
+                    <div
+                      className={`w-2.5 h-2.5 rounded-full ${currentProducer ? "bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.6)]" : "bg-amber-500 animate-pulse shadow-[0_0_8px_rgba(245,158,11,0.6)]"}`}
+                    />
+                    <span
+                      className={`text-sm font-bold truncate max-w-[240px] ${currentProducer ? "text-gray-800" : "text-gray-500"}`}
+                    >
+                      {currentProducer
+                        ? currentProducer.nome || currentProducer.name
+                        : "Selecione o Produtor..."}
+                    </span>
+                  </div>
+                  <Search
                     size={16}
-                    className="text-gray-400 absolute right-4 pointer-events-none"
+                    className="text-gray-400 group-hover:text-agro-secondary transition-colors shrink-0"
                   />
-                </div>
+                </button>
               </div>
 
               {currentProducer &&
@@ -335,9 +364,141 @@ export function DashboardLayout() {
           </div>
         </header>
 
-        <main className="relative flex-1 overflow-y-auto p-8">
-          <Outlet />
+        <main className="relative flex-1 overflow-y-auto p-8 bg-gray-50">
+          {currentProducer || userRole === "PRODUTOR" || isGlobalRoute ? (
+            <Outlet />
+          ) : (
+            <div className="h-full flex flex-col items-center justify-center text-center animate-in fade-in duration-500 pb-20">
+              <div className="w-20 h-20 bg-emerald-50 rounded-full flex items-center justify-center mb-6 shadow-inner border border-emerald-100">
+                <Building2 size={32} className="text-emerald-600" />
+              </div>
+              <h2 className="text-2xl font-black text-gray-800 mb-2">
+                Bem-vindo ao Agro POPs
+              </h2>
+              <p className="text-gray-500 max-w-md mx-auto">
+                Para iniciar a gestão fiscal, busque e selecione um produtor
+                rural na sua carteira de clientes.
+              </p>
+              <button
+                onClick={() => setIsProducerModalOpen(true)}
+                className="mt-6 px-6 py-3 bg-agro-secondary hover:bg-agro-primary text-white font-bold rounded-xl shadow-md transition-all flex items-center gap-2 hover:-translate-y-0.5"
+              >
+                <Search size={18} /> Selecionar Produtor
+              </button>
+            </div>
+          )}
         </main>
+
+        {/* ======================================================= */}
+        {/* MODAL PADRÃO OURO DE SELEÇÃO DE PRODUTORES              */}
+        {/* ======================================================= */}
+        {isProducerModalOpen && (
+          <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[100] flex items-center justify-center p-4 animate-in fade-in duration-200">
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl flex flex-col max-h-[85vh] overflow-hidden animate-in zoom-in-95 duration-300">
+              <div className="p-6 border-b border-gray-100 flex items-center justify-between bg-white shrink-0">
+                <div>
+                  <h2 className="text-xl font-bold text-gray-800">
+                    Selecione o Produtor
+                  </h2>
+                  <p className="text-sm text-gray-500 mt-1">
+                    Busque em sua carteira para gerenciar as notas e o LCDPR.
+                  </p>
+                </div>
+                <button
+                  onClick={() => setIsProducerModalOpen(false)}
+                  className="p-2 bg-gray-50 hover:bg-rose-50 hover:text-rose-500 rounded-xl text-gray-400 transition-colors"
+                >
+                  <X size={20} />
+                </button>
+              </div>
+
+              <div className="p-4 border-b border-gray-100 bg-gray-50/50 shrink-0">
+                <div className="relative">
+                  <Search
+                    size={18}
+                    className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400"
+                  />
+                  <input
+                    type="text"
+                    placeholder="Buscar por nome, CPF ou CNPJ..."
+                    value={producerSearchTerm}
+                    onChange={(e) => setProducerSearchTerm(e.target.value)}
+                    className="w-full pl-12 pr-4 py-3.5 bg-white border border-gray-200 rounded-xl outline-none focus:border-agro-secondary focus:ring-4 focus:ring-agro-secondary/10 text-sm transition-all shadow-sm"
+                    autoFocus
+                  />
+                </div>
+              </div>
+
+              <div className="flex-1 overflow-y-auto p-4 bg-gray-50/30">
+                <div className="space-y-2">
+                  {filteredProducers.map((p: any) => {
+                    const isSelected = currentProducer?.id === p.id;
+                    return (
+                      <button
+                        key={p.id}
+                        onClick={() => {
+                          setCurrentProducer(p);
+                          setCurrentProperty(null);
+                          setIsProducerModalOpen(false);
+                          setProducerSearchTerm("");
+                        }}
+                        className={`w-full flex items-center justify-between p-4 rounded-xl transition-all border ${
+                          isSelected
+                            ? "bg-emerald-50 border-emerald-200 shadow-sm"
+                            : "bg-white border-gray-100 hover:border-emerald-200 hover:shadow-md hover:-translate-y-0.5"
+                        }`}
+                      >
+                        <div className="flex items-center gap-4 text-left">
+                          <div
+                            className={`w-12 h-12 rounded-full flex items-center justify-center font-bold shrink-0 ${isSelected ? "bg-emerald-500 text-white" : "bg-emerald-100 text-emerald-700"}`}
+                          >
+                            <User size={20} />
+                          </div>
+                          <div>
+                            <p className="font-bold text-gray-800 text-base">
+                              {p.nome || p.name}
+                            </p>
+                            <p className="text-xs text-gray-500 font-mono mt-0.5 flex items-center gap-1.5">
+                              {maskCpfCnpj(p.cpfCnpj || p.document)}
+                            </p>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-4">
+                          <span
+                            className={`text-[11px] font-bold px-3 py-1.5 rounded-lg flex items-center gap-1.5 border ${isSelected ? "bg-white text-emerald-700 border-emerald-100" : "bg-gray-50 text-gray-600 border-gray-200"}`}
+                            title="Empreendimentos Vinculados"
+                          >
+                            <Building2 size={14} />{" "}
+                            {p.propriedades?.length || 1}
+                          </span>
+                          <div
+                            className={`w-8 h-8 rounded-full flex items-center justify-center ${isSelected ? "bg-emerald-500 text-white" : "bg-gray-100 text-gray-400"}`}
+                          >
+                            <ChevronRight size={16} />
+                          </div>
+                        </div>
+                      </button>
+                    );
+                  })}
+
+                  {filteredProducers.length === 0 && (
+                    <div className="py-16 flex flex-col items-center justify-center text-gray-400">
+                      <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mb-4">
+                        <Search size={28} className="text-gray-300" />
+                      </div>
+                      <p className="font-medium text-gray-600">
+                        Nenhum produtor encontrado.
+                      </p>
+                      <p className="text-xs mt-1">
+                        Revise os termos da sua busca.
+                      </p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

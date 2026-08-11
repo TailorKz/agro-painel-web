@@ -106,7 +106,7 @@ export function ProducerProvider({ children }: { children: ReactNode }) {
               headers: { Authorization: `Bearer ${token}` },
             },
           );
-          if (response.ok) {
+         if (response.ok) {
             const dadosReais = await response.json();
             const dadosFormatados = dadosReais.map((p: RawProducer) => ({
               ...p,
@@ -115,12 +115,12 @@ export function ProducerProvider({ children }: { children: ReactNode }) {
               document: p.cpfCnpj,
               ie: p.inscricaoEstadual,
             }));
+            
             setProducersList(dadosFormatados);
-            if (dadosFormatados.length > 0) {
-              setCurrentProducer(dadosFormatados[0]);
-            } else {
-              setCurrentProducer(null);
-            }
+            
+            // PADRÃO OURO: Força o estado inicial a ficar vazio para o contador
+            setCurrentProducer(null);
+            
           } else if (response.status === 401 || response.status === 403) {
             localStorage.clear();
             alert(
