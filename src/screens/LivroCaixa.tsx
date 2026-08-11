@@ -217,6 +217,8 @@ export function LivroCaixa() {
   const [isSaving, setIsSaving] = useState(false);
   const [feedback, setFeedback] = useState({ text: "", type: "" });
 
+  const [ocultarNaoLancadas, setOcultarNaoLancadas] = useState(true);
+
   const [selectedNotaModal, setSelectedNotaModal] = useState<any | null>(null);
   const [activeTabModal, setActiveTabModal] = useState<"itens" | "parcelas">(
     "itens",
@@ -345,7 +347,11 @@ export function LivroCaixa() {
       const mes = parseInt(lanc.data.split("-")[1]) - 1;
 
       if (ano === selectedYear) {
-        // Multiplicador da fazenda age sobre tudo!
+        if (ocultarNaoLancadas) {
+          if (lanc.tipo === "SAIDA" && lanc.valorDedutivel === 0) return;
+          if (lanc.tipo === "ENTRADA" && lanc.valor === 0) return;
+        }
+
         const valorRateado = lanc.valor * multiplicador;
         const dedutivelRateado = lanc.valorDedutivel * multiplicador;
 
@@ -362,7 +368,6 @@ export function LivroCaixa() {
         }
       }
     });
-
     // Calcula Saldo do Mês e Saldo Acumulado Sequencial
     let acumulado = 0;
     for (let i = 0; i < 12; i++) {
@@ -373,7 +378,20 @@ export function LivroCaixa() {
     }
 
     return agrupado;
-  }, [lancamentos, selectedYear, currentProperty]);
+  }, [lancamentos, selectedYear, currentProperty, ocultarNaoLancadas]);
+
+  // AUTO-EXPANDIR OS MESES AO REVELAR NOTAS NÃO LANÇADAS
+  useEffect(() => {
+    if (!ocultarNaoLancadas) {
+      setExpandedMonths((prev) => {
+        const novosMeses = new Set(prev);
+        dadosPorMes.forEach((mes, index) => {
+          if (mes.lancamentos.length > 0) novosMeses.add(index);
+        });
+        return novosMeses;
+      });
+    }
+  }, [ocultarNaoLancadas, dadosPorMes]);
 
   // Totalizador Anual
   const totaisAno = useMemo(() => {
@@ -464,10 +482,10 @@ export function LivroCaixa() {
 
     if (selectedNotaModal.parcelas && selectedNotaModal.parcelas.length > 0) {
       if (Math.abs(somaParcelas - selectedNotaModal.valorTotal) > 0.1) {
-        alert(
-          `Atenção: A soma das parcelas (${formatBRL(somaParcelas)}) não confere com o total da nota (${formatBRL(selectedNotaModal.valorTotal)}). Ajuste os valores antes de salvar.`,
+        const confirmar = window.confirm(
+          `Atenção: A soma das parcelas (${formatBRL(somaParcelas)}) difere do total da nota (${formatBRL(selectedNotaModal.valorTotal)}).\n\nNo LCDPR (Regime de Caixa), o valor lançado deve ser exatamente o que foi pago ou recebido.\n\nDeseja confirmar e salvar com esta diferença (ex: devido a descontos ou retenções)?`,
         );
-        return;
+        if (!confirmar) return; // Só interrompe se o usuário clicar em "Cancelar"
       }
     }
 
@@ -748,6 +766,20 @@ export function LivroCaixa() {
           </button>
         </div>
       </div>
+      {/* BOTÃO DE OCULTAR NÃO LANÇADAS                      */}
+      <div className="flex justify-end px-1 -mt-2">
+        <label className="flex items-center gap-2 cursor-pointer select-none bg-white px-3 py-1.5 rounded-lg border border-gray-200 shadow-sm hover:bg-gray-50 transition-colors">
+          <input
+            type="checkbox"
+            checked={ocultarNaoLancadas}
+            onChange={(e) => setOcultarNaoLancadas(e.target.checked)}
+            className="rounded border-gray-300 text-agro-secondary focus:ring-agro-secondary h-4 w-4"
+          />
+          <span className="text-xs font-bold text-gray-600 uppercase tracking-wider">
+            Ocultar despesas não lançadas no LCDPR
+          </span>
+        </label>
+      </div>
 
       <div
         className={`bg-white border border-gray-300 shadow-sm rounded-xl overflow-hidden font-sans transition-opacity duration-300 ${isLoading ? "opacity-50 pointer-events-none" : "opacity-100"}`}
@@ -923,9 +955,19 @@ export function LivroCaixa() {
                                       {formatBRL(Math.abs(lanc.valorDedutivel))}
                                     </span>
                                   ) : (
-                                    <span className="text-rose-600 font-medium">
-                                      {formatBRL(lanc.valorDedutivel)}
-                                    </span>
+                                    <div className="flex flex-col items-end">
+                                      {lanc.valorDedutivel !== lanc.valor && (
+                                        <span
+                                          className="text-[10px] text-gray-400 line-through"
+                                          title="Valor original (Bruto)"
+                                        >
+                                          {formatBRL(lanc.valor)}
+                                        </span>
+                                      )}
+                                      <span className="text-rose-600 font-medium">
+                                        {formatBRL(lanc.valorDedutivel)}
+                                      </span>
+                                    </div>
                                   )
                                 ) : (
                                   ""

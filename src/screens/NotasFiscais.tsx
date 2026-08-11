@@ -678,10 +678,10 @@ export function NotasFiscais() {
 
     if (selectedNotaModal.parcelas && selectedNotaModal.parcelas.length > 0) {
       if (Math.abs(somaParcelas - selectedNotaModal.valorTotal) > 0.1) {
-        alert(
-          `Atenção: A soma das parcelas (${formatBRL(somaParcelas)}) não confere com o total da nota (${formatBRL(selectedNotaModal.valorTotal)}). Ajuste os valores antes de salvar.`,
+        const confirmar = window.confirm(
+          `Atenção: A soma das parcelas (${formatBRL(somaParcelas)}) difere do total da nota (${formatBRL(selectedNotaModal.valorTotal)}).\n\nNo LCDPR (Regime de Caixa), o valor lançado deve ser exatamente o que foi pago ou recebido.\n\nDeseja confirmar e salvar com esta diferença (ex: devido a descontos ou retenções)?`
         );
-        return;
+        if (!confirmar) return; // Só interrompe se o usuário clicar em "Cancelar"
       }
     }
 
