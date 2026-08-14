@@ -38,6 +38,7 @@ type Lancamento = {
   notaId?: number;
   percDedutivel: number;
   valorDedutivel: number;
+  conferida?: boolean;
 };
 
 const MESES = [
@@ -203,8 +204,19 @@ export function LivroCaixa() {
   const [lancamentos, setLancamentos] = useState<Lancamento[]>([]);
   const [isLoading, setIsLoading] = useState(false);
 
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  const [showUnsavedModal, setShowUnsavedModal] = useState(false);
+
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [showInfoEstorno, setShowInfoEstorno] = useState(false);
+
+  const handleCloseNotaModal = () => {
+    if (hasUnsavedChanges) {
+      setShowUnsavedModal(true);
+    } else {
+      setSelectedNotaModal(null);
+    }
+  };
 
   const [formData, setFormData] = useState({
     data: new Date().toISOString().split("T")[0],
@@ -442,37 +454,61 @@ export function LivroCaixa() {
         ),
       };
       setSelectedNotaModal(updatedNota);
+      setHasUnsavedChanges(true);
     }
+  };
+
+  // MOTOR DE RATEIO INTELIGENTE
+  const recalcularParcelas = (novasParcelas: any[], valorTotal: number) => {
+    const qtd = novasParcelas.length;
+    if (qtd === 0) return [];
+    
+    const valorBase = Number((valorTotal / qtd).toFixed(2));
+    let soma = 0;
+    
+    return novasParcelas.map((p, index) => {
+      let valorFinal = valorBase;
+      // A última parcela absorve os centavos de dízima (ex: 100 / 3 = 33.33, 33.33, 33.34)
+      if (index === qtd - 1) {
+         valorFinal = Number((valorTotal - soma).toFixed(2));
+      }
+      soma += valorFinal;
+      return { ...p, valor: valorFinal };
+    });
   };
 
   const handleAdicionarParcela = () => {
     if (!selectedNotaModal) return;
+    const currentParcelas = selectedNotaModal.parcelas || [];
     const novaParcela = {
       id: null,
-      numeroParcela: String(
-        (selectedNotaModal.parcelas?.length || 0) + 1,
-      ).padStart(3, "0"),
-      dataVencimento: selectedNotaModal.dataEmissao,
+      numeroParcela: String(currentParcelas.length + 1).padStart(3, "0"),
+      dataVencimento: selectedNotaModal.dataEmissao, 
       valor: 0,
     };
-    setSelectedNotaModal({
-      ...selectedNotaModal,
-      parcelas: [...(selectedNotaModal.parcelas || []), novaParcela],
-    });
+    
+    const arrayAtualizado = recalcularParcelas([...currentParcelas, novaParcela], selectedNotaModal.valorTotal);
+    setSelectedNotaModal({ ...selectedNotaModal, parcelas: arrayAtualizado });
+    setHasUnsavedChanges(true);
   };
 
   const handleRemoverParcela = (index: number) => {
     if (!selectedNotaModal || !selectedNotaModal.parcelas) return;
     const novasParcelas = [...selectedNotaModal.parcelas];
     novasParcelas.splice(index, 1);
-    novasParcelas.forEach(
-      (p, i) => (p.numeroParcela = String(i + 1).padStart(3, "0")),
-    );
-    setSelectedNotaModal({ ...selectedNotaModal, parcelas: novasParcelas });
+    
+    novasParcelas.forEach((p, i) => (p.numeroParcela = String(i + 1).padStart(3, "0")));
+    const arrayAtualizado = recalcularParcelas(novasParcelas, selectedNotaModal.valorTotal);
+    
+    setSelectedNotaModal({ ...selectedNotaModal, parcelas: arrayAtualizado });
+    setHasUnsavedChanges(true);
   };
 
   const salvarAlteracoesNota = async () => {
-    if (!selectedNotaModal) return;
+    if (!selectedNotaModal.parcelas || selectedNotaModal.parcelas.length === 0) {
+      alert("Erro: A nota não pode ficar sem parcelas financeiras. Adicione ao menos uma.");
+      return;
+    }
 
     const somaParcelas =
       selectedNotaModal.parcelas?.reduce(
@@ -517,6 +553,7 @@ export function LivroCaixa() {
       }
 
       setSelectedNotaModal(null);
+      setHasUnsavedChanges(false);
       buscarLancamentos();
     } catch (error) {
       console.error(error);
@@ -657,6 +694,31 @@ export function LivroCaixa() {
       alert("Erro de comunicação com o servidor.");
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  // AUDITORIA E RESTAURAÇÃO DE XML
+
+  const handleToggleConferida = async (e: React.MouseEvent, id: number, valorAtual: boolean) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    try {
+      const token = localStorage.getItem("@AgroPops:token");
+      await fetch(`${baseUrl}/notas/${id}/conferida`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ conferida: !valorAtual }),
+      });
+      
+      // Se o modal estiver aberto, atualiza o cabeçalho dele na mesma hora
+      if (selectedNotaModal && selectedNotaModal.id === id) {
+        setSelectedNotaModal({ ...selectedNotaModal, conferida: !valorAtual });
+      }
+
+      buscarLancamentos(); // Atualiza a lista verde/cinza no fundo
+    } catch (error) {
+      console.error(error);
     }
   };
 
@@ -843,6 +905,7 @@ export function LivroCaixa() {
                     <table className="w-full text-left border-collapse bg-white border border-gray-300 text-[13px]">
                       <thead>
                         <tr className="bg-gray-100 text-gray-600 font-bold border-b border-gray-300 [&_th]:border-r [&_th]:border-gray-300 [&_th]:px-3 [&_th]:py-2">
+                          <th className="w-16 text-center">Auditoria</th>
                           <th className="w-20">Data</th>
                           <th className="w-32">Documento</th>
                           <th>Histórico do Lançamento</th>
@@ -863,6 +926,30 @@ export function LivroCaixa() {
                               onClick={() => abrirNotaVinculada(lanc.notaId)}
                               className={`border-b border-gray-200 [&_td]:border-r [&_td]:border-gray-200 [&_td]:px-3 [&_td]:py-1.5 text-gray-700 transition-colors ${lanc.origem === "NFE" ? "hover:bg-blue-50/50 cursor-pointer" : "hover:bg-yellow-50/50"}`}
                             >
+                              {/* 0. Auditoria */}
+                              <td 
+                                className="text-center px-3 py-1.5"
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                {lanc.origem === "NFE" ? (
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleToggleConferida(e, lanc.notaId!, lanc.conferida || false);
+                                    }}
+                                    className={`flex items-center justify-center w-full gap-1 px-1.5 py-1 rounded-md text-[10px] font-bold transition-all border uppercase tracking-wider ${
+                                      lanc.conferida
+                                        ? "bg-emerald-100 text-emerald-700 border-emerald-200"
+                                        : "bg-gray-50 text-gray-400 border-gray-200 hover:bg-emerald-50 hover:text-emerald-600"
+                                    }`}
+                                    title={lanc.conferida ? "Desmarcar conferência" : "Marcar nota como Conferida"}
+                                  >
+                                    <CheckCircle size={14} /> {lanc.conferida ? "OK" : "Pendente"}
+                                  </button>
+                                ) : (
+                                  <span className="text-gray-300 text-[10px] font-bold bg-gray-50 px-2 py-1 rounded border border-gray-200">MANUAL</span>
+                                )}
+                              </td>
                               {/* 1. Data */}
                               <td className="font-mono text-xs">
                                 {formatDate(lanc.data)}
@@ -876,7 +963,7 @@ export function LivroCaixa() {
                                 {lanc.documento}
                               </td>
 
-                              {/* 3. Histórico (Exibe a parcela correta: 002/8) */}
+                              {/* 3. Histórico ex: 002/8) */}
                               <td
                                 className="truncate max-w-[250px]"
                                 title={lanc.historico}
@@ -1242,7 +1329,7 @@ export function LivroCaixa() {
                 </div>
               </div>
               <button
-                onClick={() => setSelectedNotaModal(null)}
+                onClick={handleCloseNotaModal}
                 className="p-2 hover:bg-gray-200 rounded-lg text-gray-400 self-start"
               >
                 <X size={20} />
@@ -1816,6 +1903,49 @@ export function LivroCaixa() {
                 className="px-6 py-2.5 text-sm font-bold text-white bg-slate-800 hover:bg-slate-900 rounded-xl shadow-sm transition-colors"
               >
                 Entendi
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* MODAL DE ALTERAÇÕES NÃO SALVAS */}
+      {showUnsavedModal && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm flex flex-col overflow-hidden animate-in zoom-in-95 duration-300">
+            <div className="p-6 text-center space-y-4">
+              <div className="w-16 h-16 bg-amber-100 text-amber-600 rounded-full flex items-center justify-center mx-auto">
+                <AlertCircle size={32} />
+              </div>
+              <h2 className="text-xl font-bold text-gray-800">Atenção!</h2>
+              <p className="text-sm text-gray-600">
+                Você fez alterações na classificação ou nas parcelas desta nota e não salvou. Deseja descartar essas alterações?
+              </p>
+            </div>
+            <div className="p-4 bg-gray-50 border-t border-gray-100 flex flex-col gap-2">
+              <button 
+                onClick={() => {
+                  setShowUnsavedModal(false);
+                  salvarAlteracoesNota(); // Salva e fecha
+                }} 
+                className="w-full py-2.5 bg-agro-secondary hover:bg-agro-primary text-white font-bold rounded-xl transition-colors"
+              >
+                Salvar Alterações
+              </button>
+              <button 
+                onClick={() => {
+                  setShowUnsavedModal(false);
+                  setHasUnsavedChanges(false);
+                  setSelectedNotaModal(null); // Descarta e fecha a nota
+                }} 
+                className="w-full py-2.5 bg-rose-50 hover:bg-rose-100 text-rose-700 font-bold rounded-xl transition-colors"
+              >
+                Descartar e Sair
+              </button>
+              <button 
+                onClick={() => setShowUnsavedModal(false)} 
+                className="w-full py-2 text-gray-500 hover:bg-gray-200 font-medium rounded-xl transition-colors"
+              >
+                Cancelar (Voltar à Edição)
               </button>
             </div>
           </div>

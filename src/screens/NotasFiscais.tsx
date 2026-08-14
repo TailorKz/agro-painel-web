@@ -23,6 +23,7 @@ import {
   ScanBarcode,
   Copy,
   ExternalLink,
+  CornerDownLeft,
 } from "lucide-react";
 import { useProducer } from "../context/ProducerContext";
 import { NCM_CAPITULOS, NCM_POSICOES } from "../utils/dicionarioNcm";
@@ -50,6 +51,8 @@ type NotaFiscal = {
   chaveAcessoReferencia?: string;
   itens: ItemNota[];
   parcelas?: any[];
+  conferida?: boolean;
+  observacao?: string;
 };
 
 // NÁLISE DE CFOP (BASEADO NO SUFIXO)
@@ -196,6 +199,12 @@ export function NotasFiscais() {
   const dataFimInicial = location.state?.dataFim || "";
   const dedutibilidadeInicial = location.state?.filtroDedutibilidade || "todos";
 
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  const [showUnsavedModal, setShowUnsavedModal] = useState(false);
+
+  const [isEditingObs, setIsEditingObs] = useState(false);
+  const [tempObs, setTempObs] = useState("");
+
   const [activeTab, setActiveTab] = useState(abaInicial);
   const [activePeriod, setActivePeriod] = useState<string | number>(
     periodoInicial,
@@ -271,6 +280,14 @@ export function NotasFiscais() {
     valorTotal: "",
     isDedutivel: true,
   });
+
+  const handleCloseNotaModal = () => {
+    if (hasUnsavedChanges) {
+      setShowUnsavedModal(true);
+    } else {
+      setSelectedNotaModal(null);
+    }
+  };
 
   const [manualParcelas, setManualParcelas] = useState<any[]>([
     {
@@ -649,6 +666,10 @@ export function NotasFiscais() {
           );
         }
         setSelectedNotaModal(data);
+
+        setTempObs(data.observacao || ""); 
+        setIsEditingObs(false);
+
         if (!preserveTab) setActiveTabModal("itens");
       }
     } catch (err) {
@@ -669,37 +690,74 @@ export function NotasFiscais() {
         ),
       };
       setSelectedNotaModal(updatedNota);
+      setHasUnsavedChanges(true);
     }
+  };
+
+  // MOTOR DE RATEIO INTELIGENTE
+  const recalcularParcelas = (novasParcelas: any[], valorTotal: number) => {
+    const qtd = novasParcelas.length;
+    if (qtd === 0) return [];
+
+    const valorBase = Number((valorTotal / qtd).toFixed(2));
+    let soma = 0;
+
+    return novasParcelas.map((p, index) => {
+      let valorFinal = valorBase;
+      // A última parcela absorve os centavos de dízima (ex: 100 / 3 = 33.33, 33.33, 33.34)
+      if (index === qtd - 1) {
+        valorFinal = Number((valorTotal - soma).toFixed(2));
+      }
+      soma += valorFinal;
+      return { ...p, valor: valorFinal };
+    });
   };
 
   const handleAdicionarParcela = () => {
     if (!selectedNotaModal) return;
+    const currentParcelas = selectedNotaModal.parcelas || [];
     const novaParcela = {
       id: null,
-      numeroParcela: String(
-        (selectedNotaModal.parcelas?.length || 0) + 1,
-      ).padStart(3, "0"),
+      numeroParcela: String(currentParcelas.length + 1).padStart(3, "0"),
       dataVencimento: selectedNotaModal.dataEmissao,
       valor: 0,
     };
-    setSelectedNotaModal({
-      ...selectedNotaModal,
-      parcelas: [...(selectedNotaModal.parcelas || []), novaParcela],
-    });
+
+    const arrayAtualizado = recalcularParcelas(
+      [...currentParcelas, novaParcela],
+      selectedNotaModal.valorTotal,
+    );
+    setSelectedNotaModal({ ...selectedNotaModal, parcelas: arrayAtualizado });
+    setHasUnsavedChanges(true);
   };
 
   const handleRemoverParcela = (index: number) => {
     if (!selectedNotaModal || !selectedNotaModal.parcelas) return;
     const novasParcelas = [...selectedNotaModal.parcelas];
     novasParcelas.splice(index, 1);
+
     novasParcelas.forEach(
       (p, i) => (p.numeroParcela = String(i + 1).padStart(3, "0")),
     );
-    setSelectedNotaModal({ ...selectedNotaModal, parcelas: novasParcelas });
+    const arrayAtualizado = recalcularParcelas(
+      novasParcelas,
+      selectedNotaModal.valorTotal,
+    );
+
+    setSelectedNotaModal({ ...selectedNotaModal, parcelas: arrayAtualizado });
+    setHasUnsavedChanges(true);
   };
 
   const salvarAlteracoesNota = async () => {
-    if (!selectedNotaModal) return;
+    if (
+      !selectedNotaModal.parcelas ||
+      selectedNotaModal.parcelas.length === 0
+    ) {
+      alert(
+        "Erro: A nota não pode ficar sem parcelas financeiras. Adicione ao menos uma.",
+      );
+      return;
+    }
 
     const somaParcelas =
       selectedNotaModal.parcelas?.reduce(
@@ -744,6 +802,7 @@ export function NotasFiscais() {
       }
 
       setSelectedNotaModal(null);
+      setHasUnsavedChanges(false);
       buscarNotas();
     } catch (error) {
       console.error(error);
@@ -769,6 +828,87 @@ export function NotasFiscais() {
       if (response.ok) {
         setSelectedNotaModal(null);
         buscarNotas();
+      }
+    } catch (error) {
+      console.error(error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // AUDITORIA E RESTAURAÇÃO
+
+
+  const handleToggleConferida = async (e: React.MouseEvent, id: number, valorAtual: boolean) => {
+    e.stopPropagation(); // Evita que a linha seja clicada e abra o modal junto
+    try {
+      const token = localStorage.getItem("@AgroPops:token");
+      await fetch(`${baseUrl}/notas/${id}/conferida`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ conferida: !valorAtual }),
+      });
+      
+      // Atualiza o botão instantaneamente se o modal estiver aberto
+      if (selectedNotaModal && selectedNotaModal.id === id) {
+        setSelectedNotaModal({ ...selectedNotaModal, conferida: !valorAtual });
+      }
+
+      // Atualiza a lista silenciosamente
+      if (location.pathname.includes("livro-caixa")) buscarLancamentos();
+      else buscarNotas();
+    } catch (error) {
+      console.error(error);
+    }
+  };
+
+  const handleSalvarObservacao = async () => {
+    if (!selectedNotaModal) return;
+    try {
+      const token = localStorage.getItem("@AgroPops:token");
+      await fetch(`${baseUrl}/notas/${selectedNotaModal.id}/observacao`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ observacao: tempObs }), // <-- Usa o texto temporário
+      });
+      
+      setSelectedNotaModal({ ...selectedNotaModal, observacao: tempObs });
+      setIsEditingObs(false); // Fecha o modo de edição ao terminar
+      
+      if (location.pathname.includes("livro-caixa")) buscarLancamentos();
+      else buscarNotas();
+    } catch (error) {
+      console.error(error);
+    }
+  };
+
+  const handleRestaurarOriginal = async () => {
+    if (!selectedNotaModal) return;
+    if (
+      !window.confirm(
+        "ATENÇÃO: Deseja realmente restaurar o XML original?\n\nIsso apagará TODAS as suas edições manuais de CFOP, NCM, Dedutibilidade e Parcelas desta nota, retornando-a ao estado original da SEFAZ.",
+      )
+    )
+      return;
+
+    setIsLoading(true);
+    try {
+      const token = localStorage.getItem("@AgroPops:token");
+      const res = await fetch(
+        `${baseUrl}/notas/restaurar/${selectedNotaModal.id}`,
+        {
+          method: "POST",
+          headers: { Authorization: `Bearer ${token}` },
+        },
+      );
+
+      if (res.ok) {
+        alert("Nota restaurada com sucesso!");
+        abrirNotaVinculada(selectedNotaModal.id, true); // Recarrega os dados do modal
+        if (location.pathname.includes("livro-caixa")) buscarLancamentos();
+        else buscarNotas();
+      } else {
+        alert(await res.text());
       }
     } catch (error) {
       console.error(error);
@@ -1054,6 +1194,7 @@ export function NotasFiscais() {
           <table className="w-full text-left border-collapse">
             <thead>
               <tr className="bg-gray-50 border-b border-gray-100 text-sm text-gray-500">
+                <th className="px-6 py-4 font-medium text-center w-24">Auditoria</th>
                 <th className="px-6 py-4 font-medium">Empresa Envolvida</th>
                 <th className="px-6 py-4 font-medium">Data Emissão</th>
                 <th className="px-6 py-4 font-medium">Itens na Nota</th>
@@ -1072,6 +1213,21 @@ export function NotasFiscais() {
                     onClick={() => abrirNotaVinculada(nota.id)}
                     className="hover:bg-blue-50/50 transition-colors cursor-pointer"
                   >
+                    {/* AUDITORIA */}
+                    <td className="px-6 py-4 text-center">
+                      
+                      <button
+                        onClick={(e) => handleToggleConferida(e, nota.id, nota.conferida || false)}
+                        className={`flex items-center justify-center w-full gap-1.5 px-2 py-1.5 rounded-lg text-[10px] font-bold transition-all border uppercase tracking-wider ${
+                          nota.conferida
+                            ? "bg-emerald-100 text-emerald-700 border-emerald-200"
+                            : "bg-gray-50 text-gray-400 border-gray-200 hover:bg-emerald-50 hover:text-emerald-600"
+                        }`}
+                        title={nota.conferida ? "Desmarcar conferência" : "Marcar nota como Conferida"}
+                      >
+                        <CheckCircle size={14} /> {nota.conferida ? "Conferido" : "Pendente"}
+                      </button>
+                    </td>
                     <td className="px-6 py-4">
                       <div className="flex items-center gap-3">
                         <div
@@ -1135,14 +1291,14 @@ export function NotasFiscais() {
         )}
       </div>
 
-      {/* ============================================================== */}
       {/* MODAL: DETALHES DA NOTA (ITENS, PARCELAS E CLASSIFICAÇÃO) */}
-      {/* ============================================================== */}
       {selectedNotaModal && (
         <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-6xl overflow-hidden flex flex-col max-h-[90vh]">
             {/* CABEÇALHO DO MODAL */}
-            <div className="p-6 border-b border-gray-100 flex items-center justify-between bg-gray-50">
+            <div className="p-6 border-b border-gray-100 flex items-start justify-between bg-gray-50">
+              
+              {/* Lado Esquerdo: Ícone e Título */}
               <div className="flex items-center gap-4">
                 <div className="w-12 h-12 bg-agro-secondary/10 text-agro-secondary rounded-xl flex items-center justify-center shrink-0 shadow-inner border border-emerald-100">
                   <FileText size={24} />
@@ -1181,12 +1337,32 @@ export function NotasFiscais() {
                   </div>
                 </div>
               </div>
-              <button
-                onClick={() => setSelectedNotaModal(null)}
-                className="p-2 hover:bg-gray-200 rounded-lg text-gray-400 self-start"
-              >
-                <X size={20} />
-              </button>
+
+              {/* Lado Direito: Ações (Auditoria e Fechar) */}
+              <div className="flex items-center gap-4">
+                <button
+                  onClick={(e) => handleToggleConferida(e, selectedNotaModal.id, selectedNotaModal.conferida || false)}
+                  className={`flex items-center gap-1.5 px-4 py-2 rounded-full text-[11px] font-bold transition-all shadow-sm border uppercase tracking-wider ${
+                    selectedNotaModal.conferida 
+                    ? "bg-emerald-500 text-white border-emerald-600" 
+                    : "bg-white text-gray-500 border-gray-200 hover:bg-emerald-50 hover:text-emerald-700 hover:border-emerald-200"
+                  }`}
+                >
+                  <CheckCircle size={16} /> 
+                  {selectedNotaModal.conferida ? "Nota Auditada" : "Marcar como Conferida"}
+                </button>
+
+                <div className="w-px h-6 bg-gray-200" /> {/* Divisor visual */}
+
+                <button
+                  onClick={handleCloseNotaModal}
+                  className="p-2 hover:bg-gray-200 rounded-lg text-gray-500 transition-colors"
+                  title="Fechar"
+                >
+                  <X size={24} />
+                </button>
+              </div>
+
             </div>
 
             {/* BARRA DE INFORMAÇÕES DETALHADAS (FONTE DE VERDADE DO XML) */}
@@ -1244,7 +1420,55 @@ export function NotasFiscais() {
                   </p>
                 </div>
               </div>
+             {/* ================= CAMPO DE OBSERVAÇÃO ================= */}
+               <div className="mt-4 bg-gray-50 p-4 rounded-xl border border-gray-200 shadow-sm flex flex-col gap-2 transition-all">
+                 <div className="flex items-center justify-between">
+                   <label className="text-[10px] font-bold text-gray-500 uppercase tracking-wider flex items-center gap-1.5">
+                     <Edit3 size={14} /> Observações / Apontamentos
+                   </label>
+                   {!isEditingObs && (
+                     <button
+                       onClick={() => {
+                         setTempObs(selectedNotaModal.observacao || "");
+                         setIsEditingObs(true);
+                       }}
+                       className="text-gray-600 hover:text-gray-900 bg-white border border-gray-200 hover:bg-gray-100 px-2.5 py-1 rounded-lg transition-colors flex items-center gap-1.5 text-xs font-bold shadow-sm"
+                     >
+                       <Edit3 size={12} /> Editar
+                     </button>
+                   )}
+                 </div>
 
+                 {isEditingObs ? (
+                   <div className="flex items-end gap-2 mt-1 animate-in fade-in slide-in-from-top-1 duration-200">
+                     <textarea
+                       className="w-full bg-white border border-gray-300 rounded-lg p-3 text-sm font-medium text-gray-800 outline-none resize-none placeholder:text-gray-400 focus:border-agro-secondary focus:ring-2 focus:ring-agro-secondary/20 transition-all shadow-inner"
+                       rows={2}
+                       placeholder="Adicione detalhes, justificativas ou apontamentos internos sobre esta nota..."
+                       value={tempObs}
+                       onChange={(e) => setTempObs(e.target.value)}
+                       autoFocus
+                     />
+                     <button
+                       onClick={handleSalvarObservacao}
+                       className="h-11 px-4 bg-slate-800 hover:bg-slate-900 text-white rounded-lg flex items-center justify-center transition-colors shadow-sm shrink-0 group"
+                       title="Salvar Observação"
+                     >
+                       <CornerDownLeft size={20} strokeWidth={2.5} className="group-hover:-translate-x-0.5 group-hover:translate-y-0.5 transition-transform" />
+                     </button>
+                   </div>
+                 ) : (
+                   <div className="text-sm text-gray-700 mt-1 bg-white p-3 rounded-lg border border-gray-100 shadow-inner min-h-[44px]">
+                     {selectedNotaModal.observacao ? (
+                       <p className="whitespace-pre-wrap leading-relaxed">{selectedNotaModal.observacao}</p>
+                     ) : (
+                       <p className="text-gray-400 italic">Nenhuma observação registrada nesta nota.</p>
+                     )}
+                   </div>
+                 )}
+               </div>
+               {/* ======================================================= */}
+  
               {selectedNotaModal.chaveAcessoReferencia && (
                 <div className="p-2.5 bg-sky-50 border border-sky-100 rounded-lg flex items-center gap-2 w-fit pr-6">
                   <RotateCcw size={16} className="text-sky-600 shrink-0" />
@@ -1437,13 +1661,11 @@ export function NotasFiscais() {
                     </div>
                     <div className="flex items-center gap-2">
                       <button
-                        onClick={() =>
-                          abrirNotaVinculada(selectedNotaModal.id, true)
-                        }
-                        className="flex items-center gap-2 bg-gray-100 text-gray-600 border border-gray-200 hover:bg-gray-200 px-3 py-2 rounded-xl text-sm font-bold transition-colors"
-                        title="Desfazer alterações e voltar ao estado original da nota"
+                        onClick={handleRestaurarOriginal}
+                        className="flex items-center gap-2 bg-gray-100 text-gray-600 border border-gray-200 hover:bg-rose-50 hover:text-rose-600 hover:border-rose-200 px-3 py-2 rounded-xl text-sm font-bold transition-colors"
+                        title="Apagar edições e restaurar o XML que veio da Sefaz"
                       >
-                        <RotateCcw size={16} /> Restaurar Original
+                        <RotateCcw size={16} /> Restaurar Original do XML
                       </button>
                       <button
                         onClick={handleAdicionarParcela}
@@ -2465,6 +2687,50 @@ export function NotasFiscais() {
                 className="px-6 py-2.5 text-sm font-bold text-white bg-slate-800 hover:bg-slate-900 rounded-xl shadow-sm transition-colors"
               >
                 Entendi
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* MODAL DE ALTERAÇÕES NÃO SALVAS */}
+      {showUnsavedModal && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm flex flex-col overflow-hidden animate-in zoom-in-95 duration-300">
+            <div className="p-6 text-center space-y-4">
+              <div className="w-16 h-16 bg-amber-100 text-amber-600 rounded-full flex items-center justify-center mx-auto">
+                <AlertCircle size={32} />
+              </div>
+              <h2 className="text-xl font-bold text-gray-800">Atenção!</h2>
+              <p className="text-sm text-gray-600">
+                Você fez alterações na classificação ou nas parcelas desta nota
+                e não salvou. Deseja descartar essas alterações?
+              </p>
+            </div>
+            <div className="p-4 bg-gray-50 border-t border-gray-100 flex flex-col gap-2">
+              <button
+                onClick={() => {
+                  setShowUnsavedModal(false);
+                  salvarAlteracoesNota(); // Salva e fecha
+                }}
+                className="w-full py-2.5 bg-agro-secondary hover:bg-agro-primary text-white font-bold rounded-xl transition-colors"
+              >
+                Salvar Alterações
+              </button>
+              <button
+                onClick={() => {
+                  setShowUnsavedModal(false);
+                  setHasUnsavedChanges(false);
+                  setSelectedNotaModal(null); // Descarta e fecha a nota
+                }}
+                className="w-full py-2.5 bg-rose-50 hover:bg-rose-100 text-rose-700 font-bold rounded-xl transition-colors"
+              >
+                Descartar e Sair
+              </button>
+              <button
+                onClick={() => setShowUnsavedModal(false)}
+                className="w-full py-2 text-gray-500 hover:bg-gray-200 font-medium rounded-xl transition-colors"
+              >
+                Cancelar (Voltar à Edição)
               </button>
             </div>
           </div>
