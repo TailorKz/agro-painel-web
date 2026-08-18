@@ -462,15 +462,15 @@ export function LivroCaixa() {
   const recalcularParcelas = (novasParcelas: any[], valorTotal: number) => {
     const qtd = novasParcelas.length;
     if (qtd === 0) return [];
-    
+
     const valorBase = Number((valorTotal / qtd).toFixed(2));
     let soma = 0;
-    
+
     return novasParcelas.map((p, index) => {
       let valorFinal = valorBase;
       // A última parcela absorve os centavos de dízima (ex: 100 / 3 = 33.33, 33.33, 33.34)
       if (index === qtd - 1) {
-         valorFinal = Number((valorTotal - soma).toFixed(2));
+        valorFinal = Number((valorTotal - soma).toFixed(2));
       }
       soma += valorFinal;
       return { ...p, valor: valorFinal };
@@ -483,11 +483,14 @@ export function LivroCaixa() {
     const novaParcela = {
       id: null,
       numeroParcela: String(currentParcelas.length + 1).padStart(3, "0"),
-      dataVencimento: selectedNotaModal.dataEmissao, 
+      dataVencimento: selectedNotaModal.dataEmissao,
       valor: 0,
     };
-    
-    const arrayAtualizado = recalcularParcelas([...currentParcelas, novaParcela], selectedNotaModal.valorTotal);
+
+    const arrayAtualizado = recalcularParcelas(
+      [...currentParcelas, novaParcela],
+      selectedNotaModal.valorTotal,
+    );
     setSelectedNotaModal({ ...selectedNotaModal, parcelas: arrayAtualizado });
     setHasUnsavedChanges(true);
   };
@@ -496,17 +499,27 @@ export function LivroCaixa() {
     if (!selectedNotaModal || !selectedNotaModal.parcelas) return;
     const novasParcelas = [...selectedNotaModal.parcelas];
     novasParcelas.splice(index, 1);
-    
-    novasParcelas.forEach((p, i) => (p.numeroParcela = String(i + 1).padStart(3, "0")));
-    const arrayAtualizado = recalcularParcelas(novasParcelas, selectedNotaModal.valorTotal);
-    
+
+    novasParcelas.forEach(
+      (p, i) => (p.numeroParcela = String(i + 1).padStart(3, "0")),
+    );
+    const arrayAtualizado = recalcularParcelas(
+      novasParcelas,
+      selectedNotaModal.valorTotal,
+    );
+
     setSelectedNotaModal({ ...selectedNotaModal, parcelas: arrayAtualizado });
     setHasUnsavedChanges(true);
   };
 
   const salvarAlteracoesNota = async () => {
-    if (!selectedNotaModal.parcelas || selectedNotaModal.parcelas.length === 0) {
-      alert("Erro: A nota não pode ficar sem parcelas financeiras. Adicione ao menos uma.");
+    if (
+      !selectedNotaModal.parcelas ||
+      selectedNotaModal.parcelas.length === 0
+    ) {
+      alert(
+        "Erro: A nota não pode ficar sem parcelas financeiras. Adicione ao menos uma.",
+      );
       return;
     }
 
@@ -699,26 +712,58 @@ export function LivroCaixa() {
 
   // AUDITORIA E RESTAURAÇÃO DE XML
 
+  // ========================================================
+  // AUDITORIA COM ATUALIZAÇÃO OTIMISTA E CACHE (OPTIMISTIC UI)
+  // ========================================================
   const handleToggleConferida = async (e: React.MouseEvent, id: number, valorAtual: boolean) => {
     e.preventDefault();
-    e.stopPropagation();
+    e.stopPropagation(); 
 
+    const novoValor = !valorAtual;
+
+    // 1. ATUALIZAÇÃO IMEDIATA NA TELA E NO CACHE (Sem esperar o servidor)
+    if (location.pathname.includes("livro-caixa")) {
+      setLancamentos((prev) => prev.map((lanc) => 
+        lanc.notaId === id ? { ...lanc, conferida: novoValor } : lanc
+      ));
+    } else {
+      setNotas((prev) => {
+        const novasNotas = prev.map((nota) => 
+          nota.id === id ? { ...nota, conferida: novoValor } : nota
+        );
+        // PADRÃO OURO: Atualiza o cache local para não piscar o antigo quando voltar!
+        if (currentProducer) {
+          localStorage.setItem(
+            chaveCacheNotas(currentProducer.id, activePeriod),
+            JSON.stringify(novasNotas)
+          );
+        }
+        return novasNotas;
+      });
+    }
+
+    // 2. ATUALIZA O MODAL IMEDIATAMENTE (Se estiver aberto)
+    if (selectedNotaModal && selectedNotaModal.id === id) {
+      setSelectedNotaModal((prev: any) => ({ ...prev, conferida: novoValor }));
+    }
+
+    // 3. ENVIA PARA O SERVIDOR NO FUNDO (Background)
     try {
       const token = localStorage.getItem("@AgroPops:token");
-      await fetch(`${baseUrl}/notas/${id}/conferida`, {
+      const response = await fetch(`${baseUrl}/notas/${id}/conferida`, {
         method: "PUT",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ conferida: !valorAtual }),
+        body: JSON.stringify({ conferida: novoValor }),
       });
-      
-      // Se o modal estiver aberto, atualiza o cabeçalho dele na mesma hora
-      if (selectedNotaModal && selectedNotaModal.id === id) {
-        setSelectedNotaModal({ ...selectedNotaModal, conferida: !valorAtual });
-      }
 
-      buscarLancamentos(); // Atualiza a lista verde/cinza no fundo
+      if (!response.ok) {
+        throw new Error("Falha ao salvar no servidor");
+      }
     } catch (error) {
-      console.error(error);
+      console.error("Erro na atualização otimista:", error);
+      // 4. ROLLBACK: Se a internet cair, desfazemos e recarregamos a lista
+      if (location.pathname.includes("livro-caixa")) buscarLancamentos();
+      else buscarNotas();
     }
   };
 
@@ -927,7 +972,7 @@ export function LivroCaixa() {
                               className={`border-b border-gray-200 [&_td]:border-r [&_td]:border-gray-200 [&_td]:px-3 [&_td]:py-1.5 text-gray-700 transition-colors ${lanc.origem === "NFE" ? "hover:bg-blue-50/50 cursor-pointer" : "hover:bg-yellow-50/50"}`}
                             >
                               {/* 0. Auditoria */}
-                              <td 
+                              <td
                                 className="text-center px-3 py-1.5"
                                 onClick={(e) => e.stopPropagation()}
                               >
@@ -935,19 +980,30 @@ export function LivroCaixa() {
                                   <button
                                     onClick={(e) => {
                                       e.stopPropagation();
-                                      handleToggleConferida(e, lanc.notaId!, lanc.conferida || false);
+                                      handleToggleConferida(
+                                        e,
+                                        lanc.notaId!,
+                                        lanc.conferida || false,
+                                      );
                                     }}
                                     className={`flex items-center justify-center w-full gap-1 px-1.5 py-1 rounded-md text-[10px] font-bold transition-all border uppercase tracking-wider ${
                                       lanc.conferida
                                         ? "bg-emerald-100 text-emerald-700 border-emerald-200"
                                         : "bg-gray-50 text-gray-400 border-gray-200 hover:bg-emerald-50 hover:text-emerald-600"
                                     }`}
-                                    title={lanc.conferida ? "Desmarcar conferência" : "Marcar nota como Conferida"}
+                                    title={
+                                      lanc.conferida
+                                        ? "Desmarcar conferência"
+                                        : "Marcar nota como Conferida"
+                                    }
                                   >
-                                    <CheckCircle size={14} /> {lanc.conferida ? "OK" : "Pendente"}
+                                    <CheckCircle size={14} />{" "}
+                                    {lanc.conferida ? "Conferida" : "Pendente"}
                                   </button>
                                 ) : (
-                                  <span className="text-gray-300 text-[10px] font-bold bg-gray-50 px-2 py-1 rounded border border-gray-200">MANUAL</span>
+                                  <span className="text-gray-300 text-[10px] font-bold bg-gray-50 px-2 py-1 rounded border border-gray-200">
+                                    MANUAL
+                                  </span>
                                 )}
                               </td>
                               {/* 1. Data */}
@@ -1918,31 +1974,32 @@ export function LivroCaixa() {
               </div>
               <h2 className="text-xl font-bold text-gray-800">Atenção!</h2>
               <p className="text-sm text-gray-600">
-                Você fez alterações na classificação ou nas parcelas desta nota e não salvou. Deseja descartar essas alterações?
+                Você fez alterações na classificação ou nas parcelas desta nota
+                e não salvou. Deseja descartar essas alterações?
               </p>
             </div>
             <div className="p-4 bg-gray-50 border-t border-gray-100 flex flex-col gap-2">
-              <button 
+              <button
                 onClick={() => {
                   setShowUnsavedModal(false);
                   salvarAlteracoesNota(); // Salva e fecha
-                }} 
+                }}
                 className="w-full py-2.5 bg-agro-secondary hover:bg-agro-primary text-white font-bold rounded-xl transition-colors"
               >
                 Salvar Alterações
               </button>
-              <button 
+              <button
                 onClick={() => {
                   setShowUnsavedModal(false);
                   setHasUnsavedChanges(false);
                   setSelectedNotaModal(null); // Descarta e fecha a nota
-                }} 
+                }}
                 className="w-full py-2.5 bg-rose-50 hover:bg-rose-100 text-rose-700 font-bold rounded-xl transition-colors"
               >
                 Descartar e Sair
               </button>
-              <button 
-                onClick={() => setShowUnsavedModal(false)} 
+              <button
+                onClick={() => setShowUnsavedModal(false)}
                 className="w-full py-2 text-gray-500 hover:bg-gray-200 font-medium rounded-xl transition-colors"
               >
                 Cancelar (Voltar à Edição)

@@ -209,9 +209,12 @@ export function NotasFiscais() {
   const [activePeriod, setActivePeriod] = useState<string | number>(
     periodoInicial,
   );
-  const [filtroDedutibilidade, setFiltroDedutibilidade] = useState<
+const [filtroDedutibilidade, setFiltroDedutibilidade] = useState<
     "todos" | "dedutivel" | "nao_dedutivel"
   >(dedutibilidadeInicial);
+
+  const [filtroConferida, setFiltroConferida] = useState<"todos" | "conferida" | "pendente">("todos");
+
   const [searchTerm, setSearchTerm] = useState("");
 
   const [customStartDate, setCustomStartDate] = useState(dataInicioInicial);
@@ -334,6 +337,83 @@ export function NotasFiscais() {
         (f.cpfCnpj && f.cpfCnpj.includes(manualForm.empresaEnvolvida)),
     );
   }, [fornecedores, manualForm.empresaEnvolvida]);
+
+
+  // --- ESTADOS DA ESTAÇÃO DE ESCANEAMENTO ---
+  const [isScannerModalOpen, setIsScannerModalOpen] = useState(false);
+  const [scannedCode, setScannedCode] = useState("");
+  const [isProcessingScan, setIsProcessingScan] = useState(false);
+  const [scanHistory, setScanHistory] = useState<{code: string, status: "success" | "error", message: string}[]>([]);
+  const scannerInputRef = useRef<HTMLInputElement>(null);
+
+  // Trava o foco no input automaticamente para o contador não precisar usar o mouse
+  useEffect(() => {
+    if (isScannerModalOpen) {
+      setTimeout(() => scannerInputRef.current?.focus(), 100);
+    } else {
+      setScanHistory([]);
+      setScannedCode("");
+    }
+  }, [isScannerModalOpen]);
+
+  const handleProcessarScan = async (e: React.FormEvent) => {
+    e.preventDefault(); // Impede a página de recarregar com o 'Enter' do leitor
+    if (!scannedCode.trim() || isProcessingScan || !currentProducer) return;
+    
+    setIsProcessingScan(true);
+    const rawCode = scannedCode;
+    setScannedCode(""); // Limpa o input imediatamente para o próximo tiro do leitor!
+    
+    // Inteligência: Tenta extrair 44 dígitos seguidos. 
+    // Isso é útil se o contador ler o QR Code da NFC-e, que muitas vezes é uma URL inteira.
+    const match = rawCode.match(/\d{44}/);
+    const chaveAcesso = match ? match[0] : rawCode.replace(/\D/g, "");
+
+    if (chaveAcesso.length !== 44) {
+       setScanHistory(prev => [{ code: chaveAcesso || rawCode, status: "error", message: "Código inválido. A chave precisa ter 44 dígitos." }, ...prev]);
+       setIsProcessingScan(false);
+       scannerInputRef.current?.focus();
+       return;
+    }
+
+    try {
+       const token = localStorage.getItem("@AgroPops:token");
+       
+       const response = await fetch(`${baseUrl}/notas/importar-chave/${currentProducer.id}`, {
+         method: "POST",
+         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+         body: JSON.stringify({ chave: chaveAcesso, propriedadeId: currentProperty?.id || null })
+       });
+
+       if (response.ok) {
+         // O Java retorna a nova nota zerada (Rascunho)
+         const novaNotaServidor = await response.json(); 
+         
+         // INJEÇÃO INSTANTÂNEA: Coloca a nota no topo da tela sem baixar tudo de novo!
+         setNotas(prev => [novaNotaServidor, ...prev]);
+
+         setScanHistory(prev => [{ code: chaveAcesso, status: "success", message: `Nota ${novaNotaServidor.numero} inserida!` }, ...prev]);
+         
+       } else {
+         // CORREÇÃO: Traduz o Erro 500 do Spring Boot para uma mensagem amigável
+         const errText = await response.text();
+         let msgFinal = "Falha ao processar na SEFAZ.";
+         
+         if (errText.includes("500") || errText.includes("Internal Server Error")) {
+            msgFinal = "⚠️ Atenção: Esta nota já foi importada!";
+         } else if (errText) {
+            msgFinal = errText;
+         }
+
+         setScanHistory(prev => [{ code: chaveAcesso, status: "error", message: msgFinal }, ...prev]);
+       }
+    } catch (error) {
+       setScanHistory(prev => [{ code: chaveAcesso, status: "error", message: "Erro de conexão com o servidor." }, ...prev]);
+    } finally {
+       setIsProcessingScan(false);
+       scannerInputRef.current?.focus(); // Devolve o foco pro leitor não parar
+    }
+  };
 
   const handleAddParcelaManual = () => {
     setManualParcelas([
@@ -839,26 +919,51 @@ export function NotasFiscais() {
   // AUDITORIA E RESTAURAÇÃO
 
 
+  // ========================================================
+  // AUDITORIA COM ATUALIZAÇÃO OTIMISTA E CACHE (OPTIMISTIC UI)
+  // ========================================================
   const handleToggleConferida = async (e: React.MouseEvent, id: number, valorAtual: boolean) => {
-    e.stopPropagation(); // Evita que a linha seja clicada e abra o modal junto
+    e.preventDefault();
+    e.stopPropagation(); 
+
+    const novoValor = !valorAtual;
+
+    // 1. ATUALIZAÇÃO IMEDIATA NA TELA E NO CACHE (Sem esperar o servidor)
+    setNotas((prev) => {
+      const novasNotas = prev.map((nota) => 
+        nota.id === id ? { ...nota, conferida: novoValor } : nota
+      );
+      // PADRÃO OURO: Atualiza o cache local para não piscar o antigo quando voltar!
+      if (currentProducer) {
+        localStorage.setItem(
+          chaveCacheNotas(currentProducer.id, activePeriod),
+          JSON.stringify(novasNotas)
+        );
+      }
+      return novasNotas;
+    });
+
+    // 2. ATUALIZA O MODAL IMEDIATAMENTE (Se estiver aberto)
+    if (selectedNotaModal && selectedNotaModal.id === id) {
+      setSelectedNotaModal((prev: any) => ({ ...prev, conferida: novoValor }));
+    }
+
+    // 3. ENVIA PARA O SERVIDOR NO FUNDO (Background)
     try {
       const token = localStorage.getItem("@AgroPops:token");
-      await fetch(`${baseUrl}/notas/${id}/conferida`, {
+      const response = await fetch(`${baseUrl}/notas/${id}/conferida`, {
         method: "PUT",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ conferida: !valorAtual }),
+        body: JSON.stringify({ conferida: novoValor }),
       });
-      
-      // Atualiza o botão instantaneamente se o modal estiver aberto
-      if (selectedNotaModal && selectedNotaModal.id === id) {
-        setSelectedNotaModal({ ...selectedNotaModal, conferida: !valorAtual });
-      }
 
-      // Atualiza a lista silenciosamente
-      if (location.pathname.includes("livro-caixa")) buscarLancamentos();
-      else buscarNotas();
+      if (!response.ok) {
+        throw new Error("Falha ao salvar no servidor");
+      }
     } catch (error) {
-      console.error(error);
+      console.error("Erro na atualização otimista:", error);
+      // 4. ROLLBACK: Se a internet cair, desfazemos e recarregamos a lista
+      buscarNotas();
     }
   };
 
@@ -875,8 +980,7 @@ export function NotasFiscais() {
       setSelectedNotaModal({ ...selectedNotaModal, observacao: tempObs });
       setIsEditingObs(false); // Fecha o modo de edição ao terminar
       
-      if (location.pathname.includes("livro-caixa")) buscarLancamentos();
-      else buscarNotas();
+      buscarNotas();
     } catch (error) {
       console.error(error);
     }
@@ -943,11 +1047,16 @@ export function NotasFiscais() {
   };
 
   const notasFiltradas = notas.filter((nota) => {
+    // Filtro de Pesquisa (Texto)
     const matchesSearch =
       nota.empresaEnvolvida.toLowerCase().includes(searchTerm.toLowerCase()) ||
       nota.numero.toLowerCase().includes(searchTerm.toLowerCase());
+      
+    // Filtro de Tipo (Entrada/Saída)
     const matchesTab =
       activeTab === "todas" || nota.tipo.toLowerCase() === activeTab;
+      
+    // Filtro de Dedutibilidade (Apenas se for Saída)
     let matchesDedutibilidade = true;
     if (activeTab === "saida" && filtroDedutibilidade !== "todos") {
       if (filtroDedutibilidade === "dedutivel")
@@ -955,7 +1064,16 @@ export function NotasFiscais() {
       else if (filtroDedutibilidade === "nao_dedutivel")
         matchesDedutibilidade = nota.itens.some((item) => !item.isDedutivel);
     }
-    return matchesSearch && matchesTab && matchesDedutibilidade;
+
+    // Filtro de Auditoria (Conferidas/Pendentes)
+    let matchesConferida = true;
+    if (filtroConferida !== "todos") {
+      if (filtroConferida === "conferida") matchesConferida = nota.conferida === true;
+      if (filtroConferida === "pendente") matchesConferida = !nota.conferida; // null ou false
+    }
+
+    // Só exibe a nota se ela passar em todas as travas
+    return matchesSearch && matchesTab && matchesDedutibilidade && matchesConferida;
   });
 
   const formatBRL = (valor: number) =>
@@ -1090,9 +1208,7 @@ export function NotasFiscais() {
               <Trash2 size={18} /> Apagar Seleção
             </button>
             <button
-              onClick={() =>
-                alert("Módulo de Leitura por Scanner em desenvolvimento!")
-              }
+              onClick={() => setIsScannerModalOpen(true)}
               className="flex items-center gap-2 bg-blue-50 text-blue-700 border border-blue-200 px-4 py-2.5 rounded-xl font-medium hover:bg-blue-100 transition-colors shadow-sm text-sm"
             >
               <ScanBarcode size={18} /> Escanear
@@ -1115,8 +1231,7 @@ export function NotasFiscais() {
           </div>
         </div>
       </div>
-
-      <div className="bg-white p-4 rounded-2xl border border-gray-100 shadow-sm flex flex-col gap-4">
+<div className="bg-white p-4 rounded-2xl border border-gray-100 shadow-sm flex flex-col gap-4">
         <div className="flex flex-col md:flex-row gap-4 items-center w-full">
           <div className="flex-1 relative w-full">
             <Search
@@ -1153,31 +1268,63 @@ export function NotasFiscais() {
           </div>
         </div>
 
-        {activeTab === "saida" && (
-          <div className="flex items-center flex-wrap gap-2 pt-2 border-t border-gray-100">
+        {/* ========================================================= */}
+        {/* BARRA DE FILTROS AVANÇADOS (AUDITORIA E LIVRO CAIXA)      */}
+        {/* ========================================================= */}
+        <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-3 pt-3 border-t border-gray-100 mt-2">
+          
+          {/* FILTRO 1: AUDITORIA (Sempre visível) */}
+          <div className="flex items-center flex-wrap gap-2">
             <span className="text-sm font-semibold text-gray-500 mr-2 flex items-center gap-1">
-              <FileText size={16} /> Filtrar Saídas:
+              <CheckCircle size={16} /> Auditoria:
             </span>
             <button
-              onClick={() => setFiltroDedutibilidade("todos")}
-              className={`px-3 py-1.5 text-xs font-bold rounded-full border transition-all ${filtroDedutibilidade === "todos" ? "bg-slate-800 text-white border-slate-800" : "bg-white text-gray-500 border-gray-200 hover:bg-gray-50"}`}
+              onClick={() => setFiltroConferida("todos")}
+              className={`px-3 py-1.5 text-xs font-bold rounded-full border transition-all ${filtroConferida === "todos" ? "bg-slate-800 text-white border-slate-800 shadow-sm" : "bg-white text-gray-500 border-gray-200 hover:bg-gray-50"}`}
             >
-              Mostrar Todas
+              Todas as Notas
             </button>
             <button
-              onClick={() => setFiltroDedutibilidade("dedutivel")}
-              className={`px-3 py-1.5 text-xs font-bold rounded-full border transition-all ${filtroDedutibilidade === "dedutivel" ? "bg-emerald-100 text-emerald-700 border-emerald-200" : "bg-white text-gray-500 border-gray-200 hover:bg-gray-50"}`}
+              onClick={() => setFiltroConferida("conferida")}
+              className={`px-3 py-1.5 text-xs font-bold rounded-full border transition-all ${filtroConferida === "conferida" ? "bg-emerald-100 text-emerald-700 border-emerald-200 shadow-sm" : "bg-white text-gray-500 border-gray-200 hover:bg-gray-50"}`}
             >
-              Lançados no Livro
+              Conferidas
             </button>
             <button
-              onClick={() => setFiltroDedutibilidade("nao_dedutivel")}
-              className={`px-3 py-1.5 text-xs font-bold rounded-full border transition-all ${filtroDedutibilidade === "nao_dedutivel" ? "bg-rose-100 text-rose-700 border-rose-200" : "bg-white text-gray-500 border-gray-200 hover:bg-gray-50"}`}
+              onClick={() => setFiltroConferida("pendente")}
+              className={`px-3 py-1.5 text-xs font-bold rounded-full border transition-all ${filtroConferida === "pendente" ? "bg-amber-100 text-amber-700 border-amber-200 shadow-sm" : "bg-white text-gray-500 border-gray-200 hover:bg-gray-50"}`}
             >
-              Não Lançados
+              Pendentes
             </button>
           </div>
-        )}
+
+          {/* FILTRO 2: LIVRO CAIXA (Só aparece quando seleciona "Saídas") */}
+          {activeTab === "saida" && (
+            <div className="flex items-center flex-wrap gap-2">
+              <span className="text-sm font-semibold text-gray-500 mr-2 flex items-center gap-1">
+                <FileText size={16} /> Livro Caixa:
+              </span>
+              <button
+                onClick={() => setFiltroDedutibilidade("todos")}
+                className={`px-3 py-1.5 text-xs font-bold rounded-full border transition-all ${filtroDedutibilidade === "todos" ? "bg-slate-800 text-white border-slate-800 shadow-sm" : "bg-white text-gray-500 border-gray-200 hover:bg-gray-50"}`}
+              >
+                Todas as Saídas
+              </button>
+              <button
+                onClick={() => setFiltroDedutibilidade("dedutivel")}
+                className={`px-3 py-1.5 text-xs font-bold rounded-full border transition-all ${filtroDedutibilidade === "dedutivel" ? "bg-blue-100 text-blue-700 border-blue-200 shadow-sm" : "bg-white text-gray-500 border-gray-200 hover:bg-gray-50"}`}
+              >
+                Lançados no Livro
+              </button>
+              <button
+                onClick={() => setFiltroDedutibilidade("nao_dedutivel")}
+                className={`px-3 py-1.5 text-xs font-bold rounded-full border transition-all ${filtroDedutibilidade === "nao_dedutivel" ? "bg-rose-100 text-rose-700 border-rose-200 shadow-sm" : "bg-white text-gray-500 border-gray-200 hover:bg-gray-50"}`}
+              >
+                Uso Pessoal (Não Lançado)
+              </button>
+            </div>
+          )}
+        </div>
       </div>
 
       <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden min-h-[400px]">
@@ -1349,7 +1496,7 @@ export function NotasFiscais() {
                   }`}
                 >
                   <CheckCircle size={16} /> 
-                  {selectedNotaModal.conferida ? "Nota Auditada" : "Marcar como Conferida"}
+                  {selectedNotaModal.conferida ? "Nota Conferida" : "Marcar como Conferida"}
                 </button>
 
                 <div className="w-px h-6 bg-gray-200" /> {/* Divisor visual */}
@@ -2732,6 +2879,88 @@ export function NotasFiscais() {
               >
                 Cancelar (Voltar à Edição)
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* ============================================================== */}
+      {/* MODAL: ESTAÇÃO DE ESCANEAMENTO CONTÍNUO                        */}
+      {/* ============================================================== */}
+      {isScannerModalOpen && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[85vh]">
+            <div className="p-6 border-b border-gray-100 flex items-center justify-between bg-blue-600">
+              <h2 className="text-xl font-bold text-white flex items-center gap-3">
+                <ScanBarcode size={24} className="animate-pulse" /> 
+                Estação de Leitura
+              </h2>
+              <button
+                onClick={() => setIsScannerModalOpen(false)}
+                className="p-2 hover:bg-blue-700 rounded-lg text-blue-100 transition-colors"
+              >
+                <X size={24} />
+              </button>
+            </div>
+
+            <div className="p-8 flex flex-col gap-6 bg-gray-50">
+              <div className="text-center space-y-2">
+                <h3 className="text-lg font-bold text-gray-800">Aproxime o leitor do Código de Barras ou QR Code</h3>
+                <p className="text-sm text-gray-500">
+                  O sistema reconhecerá notas e cupons em sequência. Você não precisa usar o mouse.
+                </p>
+              </div>
+
+              {/* O INPUT QUE CAPTURA O LEITOR */}
+              <form onSubmit={handleProcessarScan} className="relative">
+                <div className={`absolute -inset-1 rounded-2xl blur opacity-30 transition-all duration-300 ${isProcessingScan ? 'bg-blue-400' : 'bg-blue-500'}`}></div>
+                <input
+                  ref={scannerInputRef}
+                  type="text"
+                  value={scannedCode}
+                  onChange={(e) => setScannedCode(e.target.value)}
+                  disabled={isProcessingScan}
+                  placeholder="Aguardando leitor..."
+                  className="relative w-full text-center text-xl font-mono tracking-widest p-4 rounded-xl border-2 border-blue-200 outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/20 bg-white shadow-sm transition-all disabled:bg-gray-100"
+                  autoFocus
+                  onBlur={() => {
+                    // Mantém o input focado sempre, a menos que o usuário feche a tela
+                    if (isScannerModalOpen) setTimeout(() => scannerInputRef.current?.focus(), 500);
+                  }}
+                />
+                {isProcessingScan && (
+                  <div className="absolute right-4 top-1/2 -translate-y-1/2 text-blue-600">
+                    <Loader2 size={24} className="animate-spin" />
+                  </div>
+                )}
+              </form>
+            </div>
+
+            {/* FEEDBACK DOS ÚLTIMOS SCANS */}
+            <div className="flex-1 bg-white border-t border-gray-100 overflow-y-auto p-4">
+              <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-4 px-2">Histórico da Sessão ({scanHistory.length})</p>
+              
+              {scanHistory.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-10 text-gray-300">
+                  <ScanBarcode size={48} className="mb-2 opacity-50" />
+                  <p>Nenhuma leitura realizada ainda.</p>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {scanHistory.map((hist, i) => (
+                    <div key={i} className={`flex items-start gap-3 p-3 rounded-xl border ${hist.status === 'success' ? 'bg-emerald-50 border-emerald-100' : 'bg-rose-50 border-rose-100'} animate-in slide-in-from-top-2`}>
+                      <div className="mt-0.5">
+                        {hist.status === 'success' ? <CheckCircle size={18} className="text-emerald-600" /> : <AlertCircle size={18} className="text-rose-600" />}
+                      </div>
+                      <div>
+                        <p className={`text-sm font-bold ${hist.status === 'success' ? 'text-emerald-800' : 'text-rose-800'}`}>
+                          {hist.message}
+                        </p>
+                        <p className="text-xs font-mono text-gray-500 mt-0.5">Chave: {hist.code.length > 20 ? `${hist.code.substring(0, 10)}...${hist.code.substring(hist.code.length - 10)}` : hist.code}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
         </div>
