@@ -17,6 +17,35 @@ import { useProducer } from "../context/ProducerContext";
 import { jsPDF } from "jspdf";
 import { toPng } from "html-to-image";
 
+// Interface para a regra que virá do JSON do banco de dados
+interface IrprConfig {
+  faturamentoMinimo: number;
+  limiteLcdpr: number;
+  lucroPresumido: number;
+  bensTotais: number;
+  faixasIrpf: {
+    id: number;
+    ate: number | null;
+    aliquota: number;
+    deducao: number;
+  }[];
+}
+
+// TABELA PADRÃO DE SEGURANÇA (Caso o Admin ainda não tenha cadastrado o ano no banco)
+const fallbackConfig: IrprConfig = {
+  faturamentoMinimo: 177920.0,
+  limiteLcdpr: 4800000.0,
+  lucroPresumido: 0.2, // 20%
+  bensTotais: 800000.0,
+  faixasIrpf: [
+    { id: 1, ate: 28467.2, aliquota: 0, deducao: 0 },
+    { id: 2, ate: 33919.8, aliquota: 7.5, deducao: 2135.04 },
+    { id: 3, ate: 45012.6, aliquota: 15.0, deducao: 4679.03 },
+    { id: 4, ate: 55976.16, aliquota: 22.5, deducao: 8054.97 },
+    { id: 5, ate: null, aliquota: 27.5, deducao: 10853.78 },
+  ],
+};
+
 export function SimuladorIRPR() {
   const { currentProducer, currentProperty } = useProducer();
   const baseUrl = import.meta.env.VITE_API_URL;
@@ -36,6 +65,9 @@ export function SimuladorIRPR() {
   const [inss, setInss] = useState("0,00");
   const [pgbl, setPgbl] = useState("0,00");
   const [pensao, setPensao] = useState("0,00");
+
+  // Estado para armazenar a configuração do ano selecionado
+  const [configAno, setConfigAno] = useState<IrprConfig>(fallbackConfig);
 
   const anosDisponiveis = useMemo(() => {
     const anoAtual = new Date().getFullYear();
@@ -74,6 +106,8 @@ export function SimuladorIRPR() {
     setIsLoading(true);
     try {
       const token = localStorage.getItem("@AgroPops:token");
+
+      // 1. Busca os totais do Livro Caixa
       const response = await fetch(
         `${baseUrl}/livro-caixa/${currentProducer.id}/totais?ano=${selectedYear}`,
         { headers: { Authorization: `Bearer ${token}` } },
@@ -84,7 +118,6 @@ export function SimuladorIRPR() {
           ? currentProperty.percentualParticipacao / 100
           : 1;
 
-        // CORREÇÃO CIRÚRGICA DA FORMATAÇÃO DO VALOR DO BANCO
         setReceitaBruta(
           formatCurrencyInput(
             (totais.totalReceitas * multiplicador).toFixed(2),
@@ -99,8 +132,29 @@ export function SimuladorIRPR() {
         setReceitaBruta("0,00");
         setDespesasDedutiveis("0,00");
       }
+
+      // 2. Busca a Tabela e Parâmetros do Ano no Banco de Dados
+      const resRegras = await fetch(`${baseUrl}/admins/regras-globais`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      if (resRegras.ok) {
+        const regrasGlobais = await resRegras.json();
+        const regraDoAno = regrasGlobais.find(
+          (r: any) => r.codigo === `IRPR_LIMITES_${selectedYear}`,
+        );
+
+        if (regraDoAno && regraDoAno.descricao) {
+          setConfigAno(JSON.parse(regraDoAno.descricao));
+        } else {
+          setConfigAno(fallbackConfig);
+        }
+      } else {
+        setConfigAno(fallbackConfig);
+      }
     } catch (error) {
       console.error("Erro ao carregar totais da API", error);
+      setConfigAno(fallbackConfig);
     } finally {
       setIsLoading(false);
     }
@@ -140,7 +194,7 @@ export function SimuladorIRPR() {
         pdf.setFontSize(10);
         pdf.setFont("helvetica", "normal");
         pdf.text(
-          `Produtor: ${currentProducer.name} | CPF/CNPJ: ${currentProducer.document}`,
+          `Produtor: ${currentProducer.nome} | CPF/CNPJ: ${currentProducer.cpfCnpj}`,
           margin,
           margin + 12,
         );
@@ -158,7 +212,7 @@ export function SimuladorIRPR() {
       await capturarEImprimir(elDados, false);
       await capturarEImprimir(elResultados, true);
       pdf.save(
-        `Planejamento_IRPF_${currentProducer.name.split(" ")[0]}_${selectedYear}.pdf`,
+        `Planejamento_IRPF_${currentProducer.nome.split(" ")[0]}_${selectedYear}.pdf`,
       );
     } catch (error) {
       console.error("Erro ao gerar PDF:", error);
@@ -172,7 +226,10 @@ export function SimuladorIRPR() {
     const dd = parseCurrency(despesasDedutiveis);
     const deps = parseInt(dependentes) || 0;
     const lucroReal = Math.max(0, rb - dd);
-    const lucroPresumido = rb * 0.2;
+
+    // Calcula o lucro presumido de forma dinâmica (ex: rb * 0.20)
+    const lucroPresumido = rb * configAno.lucroPresumido;
+
     const deducaoDependentes = deps * 2275.08;
     const tetoEducacao = (deps + 1) * 3561.5;
     const deducaoEducacao = Math.min(parseCurrency(educacao), tetoEducacao);
@@ -182,6 +239,7 @@ export function SimuladorIRPR() {
     const deducaoSaude = parseCurrency(saude);
     const deducaoInss = parseCurrency(inss);
     const deducaoPensao = parseCurrency(pensao);
+
     const baseReal = Math.max(
       0,
       lucroReal -
@@ -192,6 +250,7 @@ export function SimuladorIRPR() {
         Math.min(pgblDigitado, maxPgblReal) -
         deducaoPensao,
     );
+
     const basePresumida = Math.max(
       0,
       lucroPresumido -
@@ -199,27 +258,35 @@ export function SimuladorIRPR() {
         deducaoEducacao -
         deducaoSaude -
         deducaoInss -
-        Math.min(pgblDigitado, maxPgblPresumido) -
+      Math.min(pgblDigitado, maxPgblPresumido) -
         deducaoPensao,
     );
+
+    // Motor Dinâmico da Tabela Progressiva
     const getFaixaIndex = (base: number) => {
-      if (base <= 28467.2) return 0;
-      if (base <= 33919.8) return 1;
-      if (base <= 45012.6) return 2;
-      if (base <= 55976.16) return 3;
-      return 4;
+      let index = configAno.faixasIrpf.length - 1;
+      for (let i = 0; i < configAno.faixasIrpf.length; i++) {
+        if (
+          configAno.faixasIrpf[i].ate !== null &&
+          base <= configAno.faixasIrpf[i].ate!
+        ) {
+          return i;
+        }
+      }
+      return index;
     };
+
     const calcularImposto = (base: number, faixaIndex: number) => {
-      if (faixaIndex === 0) return 0;
-      if (faixaIndex === 1) return base * 0.075 - 2135.04;
-      if (faixaIndex === 2) return base * 0.15 - 4679.03;
-      if (faixaIndex === 3) return base * 0.225 - 8054.97;
-      return base * 0.275 - 10853.78;
+      const faixa = configAno.faixasIrpf[faixaIndex];
+      if (!faixa || faixa.aliquota === 0) return 0;
+      return base * (faixa.aliquota / 100) - faixa.deducao;
     };
+
     const faixaReal = getFaixaIndex(baseReal);
     const faixaPresumida = getFaixaIndex(basePresumida);
-    const impostoReal = calcularImposto(baseReal, faixaReal);
-    const impostoPresumido = calcularImposto(basePresumida, faixaPresumida);
+    const impostoReal = Math.max(0, calcularImposto(baseReal, faixaReal));
+    const impostoPresumido = Math.max(0, calcularImposto(basePresumida, faixaPresumida));
+
     return {
       lucroReal,
       lucroPresumido,
@@ -233,6 +300,8 @@ export function SimuladorIRPR() {
       economiaPresumida: impostoReal - impostoPresumido,
       aliquotaEfetivaReal: rb > 0 ? (impostoReal / rb) * 100 : 0,
       aliquotaEfetivaPresumida: rb > 0 ? (impostoPresumido / rb) * 100 : 0,
+      isObrigadoDeclarar: rb >= configAno.faturamentoMinimo,
+      isObrigadoLcdpr: rb >= configAno.limiteLcdpr
     };
   }, [
     receitaBruta,
@@ -243,11 +312,14 @@ export function SimuladorIRPR() {
     inss,
     pgbl,
     pensao,
+    configAno,
   ]);
 
   const getFaixaLabel = (index: number) => {
-    const faixas = ["Isento (0%)", "7,50%", "15,00%", "22,50%", "27,50%"];
-    return faixas[index] || "Isento (0%)";
+    const faixa = configAno.faixasIrpf[index];
+    if (!faixa) return "N/A";
+    if (faixa.aliquota === 0) return "Isento (0%)";
+    return `${faixa.aliquota.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}%`;
   };
 
   return (
@@ -265,7 +337,6 @@ export function SimuladorIRPR() {
           </p>
         </div>
         <div className="flex items-center gap-3">
-          {/* NOVO SELETOR DE ANOS */}
           <div className="bg-white p-1.5 rounded-xl border border-gray-200 shadow-sm flex items-center gap-1 relative z-50">
             {botoesAnosRapidos.map((ano) => (
               <button
@@ -302,7 +373,6 @@ export function SimuladorIRPR() {
               )}
               <ChevronDown size={14} />
             </button>
-            {/* Dropdown Menu do Calendário */}
             {showYearDropdown && (
               <>
                 <div
@@ -347,6 +417,39 @@ export function SimuladorIRPR() {
             )}
             Gerar Relatório (PDF)
           </button>
+        </div>
+      </div>
+
+      {/* ALERTAS DA RECEITA FEDERAL */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div
+          className={`p-4 rounded-xl border flex items-start gap-3 shadow-sm ${calculos.isObrigadoDeclarar ? "bg-rose-50 border-rose-200 text-rose-800" : "bg-emerald-50 border-emerald-200 text-emerald-800"}`}
+        >
+          <AlertCircle size={24} className="shrink-0 mt-0.5" />
+          <div>
+            <h3 className="font-bold text-sm">
+              Obrigatoriedade de IRPF ({selectedYear})
+            </h3>
+            <p className="text-xs mt-1 opacity-90 leading-relaxed">
+              {calculos.isObrigadoDeclarar
+                ? `Atenção: O faturamento ultrapassou o teto da Receita Federal (${formatBRL(configAno.faturamentoMinimo)}). A declaração de ajuste anual é obrigatória.`
+                : `O faturamento bruto atual está abaixo do limite de isenção (${formatBRL(configAno.faturamentoMinimo)}). A declaração pela receita não é obrigatória por este critério.`}
+            </p>
+          </div>
+        </div>
+
+        <div
+          className={`p-4 rounded-xl border flex items-start gap-3 shadow-sm ${calculos.isObrigadoLcdpr ? "bg-amber-50 border-amber-200 text-amber-800" : "bg-slate-50 border-slate-200 text-slate-700"}`}
+        >
+          <Scale size={24} className="shrink-0 mt-0.5" />
+          <div>
+            <h3 className="font-bold text-sm">Obrigatoriedade do LCDPR</h3>
+            <p className="text-xs mt-1 opacity-90 leading-relaxed">
+              {calculos.isObrigadoLcdpr
+                ? `O faturamento atingiu a super-regra de ${formatBRL(configAno.limiteLcdpr)}. É obrigatória a entrega do arquivo digital estruturado (LCDPR) e assinatura com e-CPF.`
+                : `Faturamento dentro do limite normal. A apuração pode ser mantida de forma simplificada sem entrega do arquivo digital estruturado.`}
+            </p>
+          </div>
         </div>
       </div>
 
@@ -630,7 +733,7 @@ export function SimuladorIRPR() {
                       : "text-gray-400"
                   }
                 />
-                Lucro Presumido (20%)
+                Lucro Presumido ({(configAno.lucroPresumido * 100).toFixed(0)}%)
               </h3>
               <p className="text-xs text-gray-500 mb-6 border-b border-gray-200 pb-4">
                 Isenção de comprovação das despesas de custeio.
@@ -685,7 +788,7 @@ export function SimuladorIRPR() {
                 <Info size={18} className="text-gray-400" />
               </span>
               <h3 className="text-base font-bold text-gray-800 uppercase tracking-wider">
-                Tabela Progressiva Anual de IRPF
+                Tabela Progressiva Anual de IRPF ({selectedYear})
               </h3>
             </div>
             <div className="overflow-x-auto rounded-xl border border-gray-200">
@@ -701,107 +804,55 @@ export function SimuladorIRPR() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100 font-mono text-gray-700">
-                  <tr
-                    className={`hover:bg-gray-50 transition-colors ${calculos.faixaReal === 0 || calculos.faixaPresumida === 0 ? "bg-yellow-50/30" : ""}`}
-                  >
-                    <td className="px-4 py-3">Até R$ 28.467,20</td>
-                    <td className="px-4 py-3 text-center text-gray-400">-</td>
-                    <td className="px-4 py-3 text-right text-gray-400">-</td>
-                    <td className="px-4 py-3 flex justify-center gap-2">
-                      {calculos.faixaReal === 0 && (
-                        <span className="bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded text-[10px] font-sans font-bold flex items-center gap-1">
-                          <FileSpreadsheet size={10} /> REAL
-                        </span>
-                      )}
-                      {calculos.faixaPresumida === 0 && (
-                        <span className="bg-blue-100 text-blue-700 px-2 py-0.5 rounded text-[10px] font-sans font-bold flex items-center gap-1">
-                          <Scale size={10} /> PRESUMIDO
-                        </span>
-                      )}
-                    </td>
-                  </tr>
-                  <tr
-                    className={`hover:bg-gray-50 transition-colors ${calculos.faixaReal === 1 || calculos.faixaPresumida === 1 ? "bg-yellow-50/30" : ""}`}
-                  >
-                    <td className="px-4 py-3">
-                      De R$ 28.467,21 até R$ 33.919,80
-                    </td>
-                    <td className="px-4 py-3 text-center">7,50%</td>
-                    <td className="px-4 py-3 text-right">R$ 2.135,04</td>
-                    <td className="px-4 py-3 flex justify-center gap-2">
-                      {calculos.faixaReal === 1 && (
-                        <span className="bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded text-[10px] font-sans font-bold flex items-center gap-1">
-                          <FileSpreadsheet size={10} /> REAL
-                        </span>
-                      )}
-                      {calculos.faixaPresumida === 1 && (
-                        <span className="bg-blue-100 text-blue-700 px-2 py-0.5 rounded text-[10px] font-sans font-bold flex items-center gap-1">
-                          <Scale size={10} /> PRESUMIDO
-                        </span>
-                      )}
-                    </td>
-                  </tr>
-                  <tr
-                    className={`hover:bg-gray-50 transition-colors ${calculos.faixaReal === 2 || calculos.faixaPresumida === 2 ? "bg-yellow-50/30" : ""}`}
-                  >
-                    <td className="px-4 py-3">
-                      De R$ 33.919,81 até R$ 45.012,60
-                    </td>
-                    <td className="px-4 py-3 text-center">15,00%</td>
-                    <td className="px-4 py-3 text-right">R$ 4.679,03</td>
-                    <td className="px-4 py-3 flex justify-center gap-2">
-                      {calculos.faixaReal === 2 && (
-                        <span className="bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded text-[10px] font-sans font-bold flex items-center gap-1">
-                          <FileSpreadsheet size={10} /> REAL
-                        </span>
-                      )}
-                      {calculos.faixaPresumida === 2 && (
-                        <span className="bg-blue-100 text-blue-700 px-2 py-0.5 rounded text-[10px] font-sans font-bold flex items-center gap-1">
-                          <Scale size={10} /> PRESUMIDO
-                        </span>
-                      )}
-                    </td>
-                  </tr>
-                  <tr
-                    className={`hover:bg-gray-50 transition-colors ${calculos.faixaReal === 3 || calculos.faixaPresumida === 3 ? "bg-yellow-50/30" : ""}`}
-                  >
-                    <td className="px-4 py-3">
-                      De R$ 45.012,61 até R$ 55.976,16
-                    </td>
-                    <td className="px-4 py-3 text-center">22,50%</td>
-                    <td className="px-4 py-3 text-right">R$ 8.054,97</td>
-                    <td className="px-4 py-3 flex justify-center gap-2">
-                      {calculos.faixaReal === 3 && (
-                        <span className="bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded text-[10px] font-sans font-bold flex items-center gap-1">
-                          <FileSpreadsheet size={10} /> REAL
-                        </span>
-                      )}
-                      {calculos.faixaPresumida === 3 && (
-                        <span className="bg-blue-100 text-blue-700 px-2 py-0.5 rounded text-[10px] font-sans font-bold flex items-center gap-1">
-                          <Scale size={10} /> PRESUMIDO
-                        </span>
-                      )}
-                    </td>
-                  </tr>
-                  <tr
-                    className={`hover:bg-gray-50 transition-colors ${calculos.faixaReal === 4 || calculos.faixaPresumida === 4 ? "bg-yellow-50/30" : ""}`}
-                  >
-                    <td className="px-4 py-3">Acima de R$ 55.976,16</td>
-                    <td className="px-4 py-3 text-center">27,50%</td>
-                    <td className="px-4 py-3 text-right">R$ 10.853,78</td>
-                    <td className="px-4 py-3 flex justify-center gap-2">
-                      {calculos.faixaReal === 4 && (
-                        <span className="bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded text-[10px] font-sans font-bold flex items-center gap-1">
-                          <FileSpreadsheet size={10} /> REAL
-                        </span>
-                      )}
-                      {calculos.faixaPresumida === 4 && (
-                        <span className="bg-blue-100 text-blue-700 px-2 py-0.5 rounded text-[10px] font-sans font-bold flex items-center gap-1">
-                          <Scale size={10} /> PRESUMIDO
-                        </span>
-                      )}
-                    </td>
-                  </tr>
+                  {configAno.faixasIrpf.map((faixa, index) => {
+                    const isRealEnquadrado = calculos.faixaReal === index;
+                    const isPresumidoEnquadrado =
+                      calculos.faixaPresumida === index;
+
+                    let labelFaixa = "";
+                    if (index === 0) {
+                      labelFaixa = `Até R$ ${faixa.ate?.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}`;
+                    } else if (faixa.ate === null) {
+                      labelFaixa = `Acima de R$ ${configAno.faixasIrpf[index - 1].ate?.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}`;
+                    } else {
+                      labelFaixa = `De R$ ${(configAno.faixasIrpf[index - 1].ate! + 0.01).toLocaleString("pt-BR", { minimumFractionDigits: 2 })} até R$ ${faixa.ate.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}`;
+                    }
+
+                    return (
+                      <tr
+                        key={faixa.id}
+                        className={`hover:bg-gray-50 transition-colors ${isRealEnquadrado || isPresumidoEnquadrado ? "bg-yellow-50/30" : ""}`}
+                      >
+                        <td className="px-4 py-3">{labelFaixa}</td>
+                        <td className="px-4 py-3 text-center">
+                          {faixa.aliquota > 0 ? (
+                            `${faixa.aliquota.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}%`
+                          ) : (
+                            <span className="text-gray-400">-</span>
+                          )}
+                        </td>
+                        <td className="px-4 py-3 text-right">
+                          {faixa.deducao > 0 ? (
+                            formatBRL(faixa.deducao)
+                          ) : (
+                            <span className="text-gray-400">-</span>
+                          )}
+                        </td>
+                        <td className="px-4 py-3 flex justify-center gap-2">
+                          {isRealEnquadrado && (
+                            <span className="bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded text-[10px] font-sans font-bold flex items-center gap-1">
+                              <FileSpreadsheet size={10} /> REAL
+                            </span>
+                          )}
+                          {isPresumidoEnquadrado && (
+                            <span className="bg-blue-100 text-blue-700 px-2 py-0.5 rounded text-[10px] font-sans font-bold flex items-center gap-1">
+                              <Scale size={10} /> PRESUMIDO
+                            </span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>

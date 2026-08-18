@@ -311,7 +311,7 @@ const baseUrl = import.meta.env.VITE_API_URL;
       }
     } catch (error) {
       console.error("Erro na conexão:", error);
-      setApiError('Servidor indisponível. Verifique se o backend Java está rodando.');
+      setApiError('Servidor indisponível. Tente novamente mais tarde ou contate o suporte.');
     } finally {
       setIsLoading(false);
     }

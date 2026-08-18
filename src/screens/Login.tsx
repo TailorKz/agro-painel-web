@@ -190,7 +190,7 @@ export function Login() {
       }
     } catch (error) {
       console.error("Erro na conexão:", error);
-      setGlobalError('Servidor indisponível. Verifique se o backend Java está rodando.');
+      setGlobalError('Servidor indisponível. Tente novamente mais tarde ou contate o suporte.');
     } finally {
       setIsLoading(false);
     }
