@@ -303,6 +303,37 @@ const [filtroDedutibilidade, setFiltroDedutibilidade] = useState<
 
   const [showParcelasManual, setShowParcelasManual] = useState(false);
 
+  // --- INÍCIO: MOTOR DE MÁSCARA E RATEIO (LANÇAMENTO MANUAL) ---
+  const formatCurrencyInput = (value: string) => {
+    const raw = value.replace(/\D/g, "");
+    if (!raw) return "";
+    const numeric = parseInt(raw, 10) / 100;
+    return numeric.toLocaleString("pt-BR", {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
+  };
+
+  const recalcularParcelasManuais = (parcelasArray: any[], totalStr: string) => {
+    const totalNum = parseFloat(totalStr.replace(/\./g, "").replace(",", ".")) || 0;
+    const qtd = parcelasArray.length;
+    if (qtd === 0) return [];
+
+    const valorBase = Number((totalNum / qtd).toFixed(2));
+    let soma = 0;
+
+    return parcelasArray.map((p, index) => {
+      let valorFinal = valorBase;
+      if (index === qtd - 1) {
+        valorFinal = Number((totalNum - soma).toFixed(2));
+      }
+      soma += valorFinal;
+      
+      const valorMascarado = valorFinal.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      return { ...p, valor: valorMascarado };
+    });
+  };
+
   useEffect(() => {
     const fetchFornecedores = async () => {
       const userRole = localStorage.getItem("@AgroPops:userRole");
@@ -416,7 +447,7 @@ const [filtroDedutibilidade, setFiltroDedutibilidade] = useState<
   };
 
   const handleAddParcelaManual = () => {
-    setManualParcelas([
+    const novas = [
       ...manualParcelas,
       {
         id: Date.now(),
@@ -424,13 +455,14 @@ const [filtroDedutibilidade, setFiltroDedutibilidade] = useState<
         dataVencimento: manualForm.dataEmissao,
         valor: "",
       },
-    ]);
+    ];
+    setManualParcelas(recalcularParcelasManuais(novas, manualForm.valorTotal));
   };
 
   const handleRemoveParcelaManual = (id: number) => {
-    const novas = manualParcelas.filter((p) => p.id !== id);
-    novas.forEach((p, i) => (p.numeroParcela = String(i + 1).padStart(3, "0")));
-    setManualParcelas(novas);
+    const filtradas = manualParcelas.filter((p) => p.id !== id);
+    filtradas.forEach((p, i) => (p.numeroParcela = String(i + 1).padStart(3, "0")));
+    setManualParcelas(recalcularParcelasManuais(filtradas, manualForm.valorTotal));
   };
 
   const handleSalvarNotaManual = async (e: React.FormEvent) => {
@@ -2208,13 +2240,17 @@ const [filtroDedutibilidade, setFiltroDedutibilidade] = useState<
                       placeholder="0,00"
                       value={manualForm.valorTotal}
                       onChange={(e) => {
-                        const val = e.target.value.replace(/[^0-9,.-]/g, "");
-                        setManualForm({ ...manualForm, valorTotal: val });
-                        if (manualParcelas.length === 1)
-                          setManualParcelas([
-                            { ...manualParcelas[0], valor: val },
-                          ]);
-                      }}
+                      const val = formatCurrencyInput(e.target.value);
+                      setManualForm({ ...manualForm, valorTotal: val });
+                      
+                      if (showParcelasManual) {
+                        setManualParcelas((prev) => recalcularParcelasManuais(prev, val));
+                      } else {
+                        setManualParcelas((prev) =>
+                          prev.map((p, i) => (i === 0 ? { ...p, valor: val } : p)),
+                        );
+                      }
+                    }}
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg outline-none text-lg font-mono font-bold focus:border-agro-secondary text-right text-gray-800"
                     />
                   </div>
@@ -2303,8 +2339,9 @@ const [filtroDedutibilidade, setFiltroDedutibilidade] = useState<
                             type="date"
                             value={p.dataVencimento}
                             onChange={(e) => {
+                              const val = formatCurrencyInput(e.target.value);
                               const novas = [...manualParcelas];
-                              novas[index].dataVencimento = e.target.value;
+                              novas[index].valor = val;
                               setManualParcelas(novas);
                             }}
                             className="w-full px-2 py-1.5 border border-gray-200 rounded text-sm outline-none focus:border-blue-400 font-medium text-blue-800"

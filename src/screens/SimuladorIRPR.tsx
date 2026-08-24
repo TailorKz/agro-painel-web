@@ -81,8 +81,10 @@ export function SimuladorIRPR() {
   }, [selectedYear]);
 
   const parseCurrency = (value: string) => {
-    const numeric = value.replace(/[^0-9,-]/g, "").replace(",", ".");
-    return parseFloat(numeric) || 0;
+    if (!value) return 0;
+    // Remove os pontos de milhar, troca vírgula por ponto, e converte para float
+    const cleanString = value.split('.').join('').replace(',', '.');
+    return parseFloat(cleanString) || 0;
   };
 
   const formatCurrencyInput = (value: string) => {
@@ -145,7 +147,12 @@ export function SimuladorIRPR() {
         );
 
         if (regraDoAno && regraDoAno.descricao) {
-          setConfigAno(JSON.parse(regraDoAno.descricao));
+          try {
+            setConfigAno(JSON.parse(regraDoAno.descricao));
+          } catch (e) {
+            console.error("Erro ao ler JSON da Regra", e);
+            setConfigAno(fallbackConfig);
+          }
         } else {
           setConfigAno(fallbackConfig);
         }
@@ -284,8 +291,17 @@ export function SimuladorIRPR() {
 
     const faixaReal = getFaixaIndex(baseReal);
     const faixaPresumida = getFaixaIndex(basePresumida);
-    const impostoReal = Math.max(0, calcularImposto(baseReal, faixaReal));
-    const impostoPresumido = Math.max(0, calcularImposto(basePresumida, faixaPresumida));
+    
+    let impostoReal = Math.max(0, calcularImposto(baseReal, faixaReal));
+    let impostoPresumido = Math.max(0, calcularImposto(basePresumida, faixaPresumida));
+
+    const isObrigadoDeclarar = rb >= configAno.faturamentoMinimo;
+
+    // Se não atingiu o teto de obrigatoriedade, o imposto rural é isento/zero.
+    if (!isObrigadoDeclarar) {
+      impostoReal = 0;
+      impostoPresumido = 0;
+    }
 
     return {
       lucroReal,
@@ -300,7 +316,7 @@ export function SimuladorIRPR() {
       economiaPresumida: impostoReal - impostoPresumido,
       aliquotaEfetivaReal: rb > 0 ? (impostoReal / rb) * 100 : 0,
       aliquotaEfetivaPresumida: rb > 0 ? (impostoPresumido / rb) * 100 : 0,
-      isObrigadoDeclarar: rb >= configAno.faturamentoMinimo,
+      isObrigadoDeclarar,
       isObrigadoLcdpr: rb >= configAno.limiteLcdpr
     };
   }, [
@@ -703,7 +719,7 @@ export function SimuladorIRPR() {
                 <p
                   className={`text-3xl font-black font-mono ${calculos.impostoReal === 0 ? "text-emerald-600" : "text-gray-900"}`}
                 >
-                  {formatBRL(calculos.impostoReal)}
+                  {!calculos.isObrigadoDeclarar ? "ISENTO" : formatBRL(calculos.impostoReal)}
                 </p>
               </div>
 
@@ -769,7 +785,7 @@ export function SimuladorIRPR() {
                 <p
                   className={`text-3xl font-black font-mono ${calculos.impostoPresumido === 0 ? "text-blue-600" : "text-gray-900"}`}
                 >
-                  {formatBRL(calculos.impostoPresumido)}
+                  {!calculos.isObrigadoDeclarar ? "ISENTO" : formatBRL(calculos.impostoPresumido)}
                 </p>
               </div>
 
