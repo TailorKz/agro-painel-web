@@ -442,10 +442,10 @@ export function DashboardLayout() {
                           setIsProducerModalOpen(false);
                           setProducerSearchTerm("");
                         }}
-                        className={`w-full flex items-center justify-between p-4 rounded-xl transition-all border ${
+                        className={`w-full flex items-center justify-between p-4 rounded-xl transition-all border cursor-pointer ${
                           isSelected
                             ? "bg-emerald-50 border-emerald-200 shadow-sm"
-                            : "bg-white border-gray-100 hover:border-emerald-200 hover:shadow-md hover:-translate-y-0.5"
+                            : "bg-white border-gray-100 hover:border-emerald-200 hover:shadow-md hover:-translate-y-0.5 hover:shadow-emerald-100"
                         }`}
                       >
                         <div className="flex items-center gap-4 text-left">
