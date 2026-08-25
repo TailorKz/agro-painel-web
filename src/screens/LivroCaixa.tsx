@@ -715,27 +715,33 @@ export function LivroCaixa() {
   // ========================================================
   // AUDITORIA COM ATUALIZAÇÃO OTIMISTA E CACHE (OPTIMISTIC UI)
   // ========================================================
-  const handleToggleConferida = async (e: React.MouseEvent, id: number, valorAtual: boolean) => {
+  const handleToggleConferida = async (
+    e: React.MouseEvent,
+    id: number,
+    valorAtual: boolean,
+  ) => {
     e.preventDefault();
-    e.stopPropagation(); 
+    e.stopPropagation();
 
     const novoValor = !valorAtual;
 
     // 1. ATUALIZAÇÃO IMEDIATA NA TELA E NO CACHE (Sem esperar o servidor)
     if (location.pathname.includes("livro-caixa")) {
-      setLancamentos((prev) => prev.map((lanc) => 
-        lanc.notaId === id ? { ...lanc, conferida: novoValor } : lanc
-      ));
+      setLancamentos((prev) =>
+        prev.map((lanc) =>
+          lanc.notaId === id ? { ...lanc, conferida: novoValor } : lanc,
+        ),
+      );
     } else {
       setNotas((prev) => {
-        const novasNotas = prev.map((nota) => 
-          nota.id === id ? { ...nota, conferida: novoValor } : nota
+        const novasNotas = prev.map((nota) =>
+          nota.id === id ? { ...nota, conferida: novoValor } : nota,
         );
         // PADRÃO OURO: Atualiza o cache local para não piscar o antigo quando voltar!
         if (currentProducer) {
           localStorage.setItem(
             chaveCacheNotas(currentProducer.id, activePeriod),
-            JSON.stringify(novasNotas)
+            JSON.stringify(novasNotas),
           );
         }
         return novasNotas;
@@ -752,7 +758,10 @@ export function LivroCaixa() {
       const token = localStorage.getItem("@AgroPops:token");
       const response = await fetch(`${baseUrl}/notas/${id}/conferida`, {
         method: "PUT",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
         body: JSON.stringify({ conferida: novoValor }),
       });
 
@@ -1658,8 +1667,8 @@ export function LivroCaixa() {
                     </div>
                   </div>
 
-                  <div className="border border-gray-100 rounded-xl overflow-hidden">
-                    <table className="w-full text-left border-collapse">
+                 <div className="border border-gray-100 rounded-xl overflow-visible">
+  <table className="w-full text-left border-collapse">
                       <thead>
                         <tr className="bg-gray-50 border-b border-gray-100 text-xs text-gray-500 uppercase">
                           <th className="px-4 py-3 font-medium">Nº Parcela</th>
@@ -1694,19 +1703,41 @@ export function LivroCaixa() {
                                 className="hover:bg-blue-50/20 transition-colors"
                               >
                                 <td className="px-4 py-3 text-sm font-bold text-gray-700 font-mono">
-                                  <input
-                                    type="text"
-                                    value={parcela.numeroParcela}
-                                    onChange={(e) => {
-                                      const newVal = e.target.value;
-                                      setSelectedNotaModal((prev: any) => {
-                                        const p = [...prev.parcelas];
-                                        p[index].numeroParcela = newVal;
-                                        return { ...prev, parcelas: p };
-                                      });
-                                    }}
-                                    className="w-16 px-2 py-1 border border-gray-200 rounded text-center outline-none focus:border-blue-400"
-                                  />
+                                  <div className="flex items-center gap-1.5">
+                                    <input
+                                      type="text"
+                                      value={parcela.numeroParcela}
+                                      readOnly={parcela.numeroParcela === "RET/AV"} // <-- TRAVA A EDIÇÃO AQUI
+                                      onChange={(e) => {
+                                        const newVal = e.target.value;
+                                        setSelectedNotaModal((prev: any) => {
+                                          const p = [...prev.parcelas];
+                                          p[index].numeroParcela = newVal;
+                                          return { ...prev, parcelas: p };
+                                        });
+                                      }}
+                                      className={`w-16 px-2 py-1 border rounded text-center outline-none transition-colors ${
+                                        parcela.numeroParcela === "RET/AV"
+                                          ? "border-amber-300 bg-amber-50 text-amber-800 cursor-not-allowed" // <-- VISUAL DE BLOQUEADO
+                                          : "border-gray-200 focus:border-blue-400"
+                                      }`}
+                                    />
+                                    
+                                    {parcela.numeroParcela === "RET/AV" && (
+                                      <div className="relative group flex items-center">
+                                        <Info size={16} className="text-amber-500 cursor-help" />
+                                        
+                                        {/* TOOLTIP ABRINDO PARA A DIREITA (Não corta no topo) */}
+                                        <div className="absolute top-1/2 -translate-y-1/2 left-full ml-3 hidden group-hover:block w-56 p-3 bg-gray-900 text-white text-xs font-sans font-normal leading-relaxed rounded-xl shadow-2xl z-[999] pointer-events-none">
+                                          <span className="font-bold text-amber-400 mb-1 block">Retenção / À Vista:</span>
+                                          Diferença gerada pelo sistema para fechar o valor da nota (ex: FUNRURAL, impostos ou entrada à vista).
+                                          
+                                          {/* Setinha do balão apontando para a esquerda */}
+                                          <div className="absolute top-1/2 -translate-y-1/2 right-full border-4 border-transparent border-r-gray-900" />
+                                        </div>
+                                      </div>
+                                    )}
+                                  </div>
                                 </td>
                                 <td className="px-4 py-3">
                                   <input

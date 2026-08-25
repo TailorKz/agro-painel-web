@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import {
   Save,
   Lock,
@@ -7,7 +7,23 @@ import {
   AlertCircle,
   ShieldCheck,
   UserPlus,
+  Scale,
 } from "lucide-react";
+
+// PADRÃO DE SEGURANÇA FORA DO COMPONENTE PARA RESET IMEDIATO
+const getDefaultConfig = () => ({
+  faturamentoMinimo: 177920.0,
+  limiteLcdpr: 4800000.0,
+  lucroPresumido: 20.0,
+  bensTotais: 800000.0,
+  faixasIrpf: [
+    { id: 1, ate: 28467.2, aliquota: 0, deducao: 0 },
+    { id: 2, ate: 33919.8, aliquota: 7.5, deducao: 2135.04 },
+    { id: 3, ate: 45012.6, aliquota: 15.0, deducao: 4679.03 },
+    { id: 4, ate: 55976.16, aliquota: 22.5, deducao: 8054.97 },
+    { id: 5, ate: null, aliquota: 27.5, deducao: 10853.78 },
+  ],
+});
 
 export function ConfiguracoesMaster() {
   const baseUrl = import.meta.env.VITE_API_URL;
@@ -16,25 +32,80 @@ export function ConfiguracoesMaster() {
   const [activeTab, setActiveTab] = useState<
     "perfil" | "senha" | "novo_admin" | "sistema"
   >("perfil");
+  const [admin, setAdmin] = useState<any>(null);
+  const [isSaving, setIsSaving] = useState(false);
+  const [isLoadingRegras, setIsLoadingRegras] = useState(false);
+  const [message, setMessage] = useState({ text: "", type: "" });
 
-  //Controle do ano dos parâmetros
-  const [anoParametro, setAnoParametro] = useState(new Date().getFullYear());
+  const [senhaAtual, setSenhaAtual] = useState("");
+  const [novaSenha, setNovaSenha] = useState("");
+  const [confirmarSenha, setConfirmarSenha] = useState("");
 
-  const [irprConfig, setIrprConfig] = useState({
-    faturamentoMinimo: 177920.0,
-    limiteLcdpr: 4800000.0,
-    lucroPresumido: 20.0,
-    bensTotais: 800000.0,
-    faixasIrpf: [
-      { id: 1, ate: 28467.2, aliquota: 0, deducao: 0 },
-      { id: 2, ate: 33919.8, aliquota: 7.5, deducao: 2135.04 },
-      { id: 3, ate: 45012.6, aliquota: 15.0, deducao: 4679.03 },
-      { id: 4, ate: 55976.16, aliquota: 22.5, deducao: 8054.97 },
-      { id: 5, ate: null, aliquota: 27.5, deducao: 10853.78 }, // null = "Acima de"
-    ],
+  const [formNovoAdmin, setFormNovoAdmin] = useState({
+    nome: "",
+    email: "",
+    senha: "",
   });
 
-  // FUNÇÕES DE MÁSCARA (Transforma números em R$ e % visualmente)
+  const [anoParametro, setAnoParametro] = useState(new Date().getFullYear());
+  const [irprConfig, setIrprConfig] = useState(getDefaultConfig());
+
+  useEffect(() => {
+    const userStorage = localStorage.getItem("@AgroPops:user");
+    if (userStorage) setAdmin(JSON.parse(userStorage));
+  }, []);
+
+  const buscarRegrasDoBanco = useCallback(
+    async (ano: number) => {
+      setIsLoadingRegras(true);
+      try {
+        const res = await fetch(
+          `${baseUrl}/admins/regras-globais?t=${Date.now()}`,
+          {
+            headers: { Authorization: `Bearer ${token}` },
+            cache: "no-store",
+          },
+        );
+        if (res.ok) {
+          const regras = await res.json();
+          const regraDoAno = regras.find(
+            (r: any) => r.codigo === `IRPR_LIMITES_${ano}`,
+          );
+          if (regraDoAno && regraDoAno.descricao) {
+            setIrprConfig(JSON.parse(regraDoAno.descricao));
+            return;
+          }
+        }
+        setIrprConfig(getDefaultConfig());
+      } catch (err) {
+        console.error("Erro ao puxar regras", err);
+        setIrprConfig(getDefaultConfig());
+      } finally {
+        setIsLoadingRegras(false);
+      }
+    },
+    [baseUrl, token],
+  );
+
+  // CARREGA A REGRA APENAS NA PRIMEIRA VEZ OU QUANDO A ABA ABRIR
+  useEffect(() => {
+    if (activeTab === "sistema" && token) {
+      buscarRegrasDoBanco(anoParametro);
+    }
+  }, [activeTab, token, buscarRegrasDoBanco]); // <-- Note que removemos o anoParametro daqui para evitar re-renders fantasma!
+
+  // ESTA É A FUNÇÃO MÁGICA QUE ZERA A TELA NA HORA DE TROCAR O ANO
+  const handleYearChange = (newYear: number) => {
+    setAnoParametro(newYear);
+    setIrprConfig(getDefaultConfig()); // Zera a tela no mesmo milissegundo para os valores padrão
+    buscarRegrasDoBanco(newYear); // Depois pergunta ao banco se tem algo para preencher
+  };
+
+  const showMessage = (text: string, type: "success" | "error") => {
+    setMessage({ text, type });
+    setTimeout(() => setMessage({ text: "", type: "" }), 6000);
+  };
+
   const formatMoney = (val: number | null) => {
     if (val === null) return "";
     return val.toLocaleString("pt-BR", {
@@ -56,34 +127,6 @@ export function ConfiguracoesMaster() {
     setIrprConfig({ ...irprConfig, faixasIrpf: novasFaixas });
   };
 
-  const [admin, setAdmin] = useState<any>(null);
-  const [isSaving, setIsSaving] = useState(false);
-  const [message, setMessage] = useState({ text: "", type: "" });
-
-  // ... (o resto do código continua igual)
-
-  // Senhas
-  const [senhaAtual, setSenhaAtual] = useState("");
-  const [novaSenha, setNovaSenha] = useState("");
-  const [confirmarSenha, setConfirmarSenha] = useState("");
-
-  // Novo Admin
-  const [formNovoAdmin, setFormNovoAdmin] = useState({
-    nome: "",
-    email: "",
-    senha: "",
-  });
-
-  useEffect(() => {
-    const userStorage = localStorage.getItem("@AgroPops:user");
-    if (userStorage) setAdmin(JSON.parse(userStorage));
-  }, []);
-
-  const showMessage = (text: string, type: "success" | "error") => {
-    setMessage({ text, type });
-    setTimeout(() => setMessage({ text: "", type: "" }), 4000);
-  };
-
   const handleSalvarPerfil = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSaving(true);
@@ -96,15 +139,12 @@ export function ConfiguracoesMaster() {
         },
         body: JSON.stringify(admin),
       });
-
       if (res.ok) {
         const atualizado = await res.json();
         localStorage.setItem("@AgroPops:user", JSON.stringify(atualizado));
         setAdmin(atualizado);
-        showMessage("Conta Mestra atualizada!", "success");
-      } else {
-        showMessage("Erro ao atualizar.", "error");
-      }
+        showMessage("Conta atualizada!", "success");
+      } else showMessage("Erro ao atualizar.", "error");
     } catch (err) {
       showMessage("Erro de conexão.", "error");
     } finally {
@@ -116,7 +156,6 @@ export function ConfiguracoesMaster() {
     e.preventDefault();
     if (novaSenha !== confirmarSenha)
       return showMessage("Senhas não coincidem.", "error");
-
     setIsSaving(true);
     try {
       const res = await fetch(`${baseUrl}/admins/senha/${admin.id}`, {
@@ -127,16 +166,12 @@ export function ConfiguracoesMaster() {
         },
         body: JSON.stringify({ senhaAtual, novaSenha }),
       });
-
       if (res.ok) {
-        showMessage("Palavra-passe alterada com segurança!", "success");
+        showMessage("Palavra-passe alterada!", "success");
         setSenhaAtual("");
         setNovaSenha("");
         setConfirmarSenha("");
-      } else {
-        const erro = await res.text();
-        showMessage(erro || "Erro ao alterar palavra-passe.", "error");
-      }
+      } else showMessage("Erro ao alterar palavra-passe.", "error");
     } catch (err) {
       showMessage("Erro de conexão.", "error");
     } finally {
@@ -147,11 +182,7 @@ export function ConfiguracoesMaster() {
   const handleCriarNovoAdmin = async (e: React.FormEvent) => {
     e.preventDefault();
     if (formNovoAdmin.senha.length < 6)
-      return showMessage(
-        "A senha precisa ter no mínimo 6 caracteres.",
-        "error",
-      );
-
+      return showMessage("Mínimo 6 caracteres.", "error");
     setIsSaving(true);
     try {
       const res = await fetch(`${baseUrl}/admins/novo-admin`, {
@@ -162,17 +193,10 @@ export function ConfiguracoesMaster() {
         },
         body: JSON.stringify(formNovoAdmin),
       });
-
       if (res.ok) {
-        showMessage(
-          `Administrador ${formNovoAdmin.nome} criado com sucesso!`,
-          "success",
-        );
-        setFormNovoAdmin({ nome: "", email: "", senha: "" }); // Reseta form
-      } else {
-        const erro = await res.text();
-        showMessage(erro || "Erro ao criar administrador.", "error");
-      }
+        showMessage(`Admin criado!`, "success");
+        setFormNovoAdmin({ nome: "", email: "", senha: "" });
+      } else showMessage("Erro ao criar admin.", "error");
     } catch (err) {
       showMessage("Erro de conexão.", "error");
     } finally {
@@ -185,18 +209,19 @@ export function ConfiguracoesMaster() {
     try {
       const codigoRegra = `IRPR_LIMITES_${anoParametro}`;
 
-      // 1. Busca para ver se já existe uma regra salva para este ano
-      const resBusca = await fetch(`${baseUrl}/admins/regras-globais`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const resBusca = await fetch(
+        `${baseUrl}/admins/regras-globais?t=${Date.now()}`,
+        {
+          headers: { Authorization: `Bearer ${token}` },
+          cache: "no-store",
+        },
+      );
 
       if (resBusca.ok) {
         const regras = await resBusca.json();
         const regraExistente = regras.find(
           (r: any) => r.codigo === codigoRegra,
         );
-
-        // 2. Se existir, deleta a antiga (pois vamos substituir pela nova edição)
         if (regraExistente) {
           await fetch(`${baseUrl}/admins/regras-globais/${regraExistente.id}`, {
             method: "DELETE",
@@ -205,7 +230,6 @@ export function ConfiguracoesMaster() {
         }
       }
 
-      // 3. Cria o pacote com o JSON atualizado da tela
       const payload = {
         tipo: "SISTEMA",
         codigo: codigoRegra,
@@ -213,7 +237,6 @@ export function ConfiguracoesMaster() {
         isDedutivel: false,
       };
 
-      // 4. Salva no banco de dados
       const resSave = await fetch(`${baseUrl}/admins/regras-globais`, {
         method: "POST",
         headers: {
@@ -225,14 +248,15 @@ export function ConfiguracoesMaster() {
 
       if (resSave.ok) {
         showMessage(
-          `Regras de ${anoParametro} publicadas com sucesso!`,
+          `Regras do ano ${anoParametro} salvas com sucesso!`,
           "success",
         );
       } else {
-        showMessage("Erro ao salvar as regras no banco.", "error");
+        const erroMsg = await resSave.text();
+        showMessage(`Erro ao salvar no banco: ${erroMsg}`, "error");
       }
     } catch (err) {
-      showMessage("Erro de conexão com o servidor.", "error");
+      showMessage("Erro de conexão.", "error");
     } finally {
       setIsSaving(false);
     }
@@ -241,16 +265,17 @@ export function ConfiguracoesMaster() {
   if (!admin) return null;
 
   return (
-    <div className="space-y-6 animate-in fade-in duration-500 max-w-4xl mx-auto">
+    <div className="space-y-6 animate-in fade-in duration-500 max-w-4xl mx-auto pb-12">
       <div>
-        <h1 className="text-2xl font-bold text-gray-800">Configurações</h1>
+        <h1 className="text-2xl font-bold text-gray-800">
+          Configurações do Master
+        </h1>
         <p className="text-sm text-gray-500 mt-1">
-          Gerencie a sua conta e atribua acessos.
+          Gerencie a sua conta e os parâmetros globais da plataforma.
         </p>
       </div>
 
       <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
-        {/* TABS DE NAVEGAÇÃO */}
         <div className="flex border-b border-gray-100 bg-gray-50/50 flex-wrap">
           <button
             onClick={() => setActiveTab("perfil")}
@@ -268,13 +293,13 @@ export function ConfiguracoesMaster() {
             onClick={() => setActiveTab("novo_admin")}
             className={`flex-1 flex items-center justify-center gap-2 px-6 py-4 text-sm font-medium transition-colors ${activeTab === "novo_admin" ? "text-blue-600 border-b-2 border-blue-600 bg-white" : "text-gray-500 hover:text-gray-800"}`}
           >
-            <UserPlus size={18} /> Novo Administrador
+            <UserPlus size={18} /> Novo Admin
           </button>
           <button
             onClick={() => setActiveTab("sistema")}
             className={`flex-1 flex items-center justify-center gap-2 px-6 py-4 text-sm font-medium transition-colors ${activeTab === "sistema" ? "text-amber-600 border-b-2 border-amber-600 bg-white" : "text-gray-500 hover:text-gray-800"}`}
           >
-            Parâmetros (IRPR)
+            <Scale size={18} /> Parâmetros (IRPR)
           </button>
         </div>
 
@@ -299,7 +324,7 @@ export function ConfiguracoesMaster() {
             >
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Nome do Administrador
+                  Nome
                 </label>
                 <input
                   type="text"
@@ -334,7 +359,7 @@ export function ConfiguracoesMaster() {
                   ) : (
                     <Save size={18} />
                   )}{" "}
-                  Guardar Alterações
+                  Guardar
                 </button>
               </div>
             </form>
@@ -347,7 +372,7 @@ export function ConfiguracoesMaster() {
             >
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Palavra-passe Atual
+                  Atual
                 </label>
                 <input
                   type="password"
@@ -359,7 +384,7 @@ export function ConfiguracoesMaster() {
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Nova Palavra-passe
+                  Nova
                 </label>
                 <input
                   type="password"
@@ -372,7 +397,7 @@ export function ConfiguracoesMaster() {
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Confirmar Nova Palavra-passe
+                  Confirmar
                 </label>
                 <input
                   type="password"
@@ -394,7 +419,7 @@ export function ConfiguracoesMaster() {
                   ) : (
                     <Lock size={18} />
                   )}{" "}
-                  Atualizar Segurança
+                  Atualizar
                 </button>
               </div>
             </form>
@@ -405,19 +430,12 @@ export function ConfiguracoesMaster() {
               onSubmit={handleCriarNovoAdmin}
               className="space-y-6 max-w-xl mx-auto"
             >
-              <div className="bg-blue-50 border border-blue-100 p-4 rounded-xl mb-6">
-                <p className="text-sm text-blue-800 font-medium">
-                  Crie acessos de administração. Os novos administradores terão
-                  as mesmas permissões para gerir a plataforma e os contadores.
-                </p>
-              </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Nome Completo
+                  Nome
                 </label>
                 <input
                   type="text"
-                  placeholder="Nome do administrador..."
                   value={formNovoAdmin.nome}
                   onChange={(e) =>
                     setFormNovoAdmin({ ...formNovoAdmin, nome: e.target.value })
@@ -428,11 +446,10 @@ export function ConfiguracoesMaster() {
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
-                  E-mail de Login
+                  E-mail
                 </label>
                 <input
                   type="email"
-                  placeholder="e-mail"
                   value={formNovoAdmin.email}
                   onChange={(e) =>
                     setFormNovoAdmin({
@@ -446,11 +463,10 @@ export function ConfiguracoesMaster() {
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Palavra-passe Inicial
+                  Senha Inicial
                 </label>
                 <input
                   type="text"
-                  placeholder="Defina a senha inicial..."
                   value={formNovoAdmin.senha}
                   onChange={(e) =>
                     setFormNovoAdmin({
@@ -474,22 +490,29 @@ export function ConfiguracoesMaster() {
                   ) : (
                     <UserPlus size={18} />
                   )}{" "}
-                  Cadastrar Administrador
+                  Cadastrar
                 </button>
               </div>
             </form>
           )}
+
           {activeTab === "sistema" && (
-            <div className="space-y-8 max-w-4xl mx-auto animate-in fade-in slide-in-from-top-2">
-              {/* CABEÇALHO COM SELETOR DE ANO */}
+            <div
+              className={`space-y-8 max-w-4xl mx-auto transition-opacity duration-300 ${isLoadingRegras ? "opacity-40 pointer-events-none" : "opacity-100"}`}
+            >
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-amber-50 border border-amber-100 p-5 rounded-xl shadow-sm">
                 <div>
-                  <h2 className="text-lg font-black text-amber-900">
+                  <h2 className="text-lg font-black text-amber-900 flex items-center gap-2">
+                    {isLoadingRegras && (
+                      <Loader2
+                        size={16}
+                        className="animate-spin text-amber-600"
+                      />
+                    )}
                     Parâmetros Anuais da Receita Federal
                   </h2>
                   <p className="text-sm text-amber-800/80 font-medium mt-1">
-                    As simulações do IRPR e LCDPR respeitarão as regras do ano
-                    selecionado.
+                    As simulações respeitarão as regras do ano selecionado.
                   </p>
                 </div>
                 <div className="flex items-center gap-3 bg-white p-2 rounded-lg border border-amber-200 shadow-sm shrink-0">
@@ -498,7 +521,7 @@ export function ConfiguracoesMaster() {
                   </label>
                   <select
                     value={anoParametro}
-                    onChange={(e) => setAnoParametro(Number(e.target.value))}
+                    onChange={(e) => handleYearChange(Number(e.target.value))}
                     className="bg-amber-50 text-amber-900 font-black text-base px-3 py-1.5 rounded outline-none border border-amber-100 cursor-pointer"
                   >
                     {[2023, 2024, 2025, 2026, 2027, 2028].map((ano) => (
@@ -510,7 +533,6 @@ export function ConfiguracoesMaster() {
                 </div>
               </div>
 
-              {/* BLOCO 1: LIMITES GERAIS */}
               <div>
                 <h3 className="text-sm font-bold text-gray-400 uppercase tracking-wider mb-4 border-b border-gray-100 pb-2">
                   Limites e Obrigatoriedades ({anoParametro})
@@ -571,7 +593,6 @@ export function ConfiguracoesMaster() {
                 </div>
               </div>
 
-              {/* BLOCO 2: TABELA PROGRESSIVA IRPF */}
               <div>
                 <h3 className="text-sm font-bold text-gray-400 uppercase tracking-wider mb-4 border-b border-gray-100 pb-2">
                   Tabela Progressiva Anual (Cálculo do Imposto)
@@ -658,15 +679,15 @@ export function ConfiguracoesMaster() {
               <div className="pt-4 flex justify-end border-t border-gray-100">
                 <button
                   onClick={handleSalvarParametros}
-                  disabled={isSaving}
+                  disabled={isSaving || isLoadingRegras}
                   className="px-8 py-3.5 bg-slate-800 hover:bg-slate-900 text-white font-bold rounded-xl shadow-md shadow-slate-200 flex items-center gap-2 transition-all active:scale-95 disabled:opacity-50"
                 >
                   {isSaving ? (
                     <Loader2 size={18} className="animate-spin" />
                   ) : (
                     <Save size={18} />
-                  )}
-                  Publicar Novas Regras de {anoParametro}
+                  )}{" "}
+                  Publicar Regras de {anoParametro}
                 </button>
               </div>
             </div>

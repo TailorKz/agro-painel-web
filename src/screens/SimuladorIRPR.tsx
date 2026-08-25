@@ -17,7 +17,6 @@ import { useProducer } from "../context/ProducerContext";
 import { jsPDF } from "jspdf";
 import { toPng } from "html-to-image";
 
-// Interface para a regra que virá do JSON do banco de dados
 interface IrprConfig {
   faturamentoMinimo: number;
   limiteLcdpr: number;
@@ -31,11 +30,10 @@ interface IrprConfig {
   }[];
 }
 
-// TABELA PADRÃO DE SEGURANÇA (Caso o Admin ainda não tenha cadastrado o ano no banco)
 const fallbackConfig: IrprConfig = {
   faturamentoMinimo: 177920.0,
   limiteLcdpr: 4800000.0,
-  lucroPresumido: 0.2, // 20%
+  lucroPresumido: 20.0,
   bensTotais: 800000.0,
   faixasIrpf: [
     { id: 1, ate: 28467.2, aliquota: 0, deducao: 0 },
@@ -66,7 +64,6 @@ export function SimuladorIRPR() {
   const [pgbl, setPgbl] = useState("0,00");
   const [pensao, setPensao] = useState("0,00");
 
-  // Estado para armazenar a configuração do ano selecionado
   const [configAno, setConfigAno] = useState<IrprConfig>(fallbackConfig);
 
   const anosDisponiveis = useMemo(() => {
@@ -82,8 +79,7 @@ export function SimuladorIRPR() {
 
   const parseCurrency = (value: string) => {
     if (!value) return 0;
-    // Remove os pontos de milhar, troca vírgula por ponto, e converte para float
-    const cleanString = value.split('.').join('').replace(',', '.');
+    const cleanString = value.split(".").join("").replace(",", ".");
     return parseFloat(cleanString) || 0;
   };
 
@@ -112,14 +108,15 @@ export function SimuladorIRPR() {
       // 1. Busca os totais do Livro Caixa
       const response = await fetch(
         `${baseUrl}/livro-caixa/${currentProducer.id}/totais?ano=${selectedYear}`,
-        { headers: { Authorization: `Bearer ${token}` } },
+        {
+          headers: { Authorization: `Bearer ${token}` },
+        },
       );
       if (response.ok) {
         const totais = await response.json();
         const multiplicador = currentProperty
           ? currentProperty.percentualParticipacao / 100
           : 1;
-
         setReceitaBruta(
           formatCurrencyInput(
             (totais.totalReceitas * multiplicador).toFixed(2),
@@ -135,10 +132,14 @@ export function SimuladorIRPR() {
         setDespesasDedutiveis("0,00");
       }
 
-      // 2. Busca a Tabela e Parâmetros do Ano no Banco de Dados
-      const resRegras = await fetch(`${baseUrl}/admins/regras-globais`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      // 2. Busca a Tabela e Parâmetros (SEM CACHE)
+      const resRegras = await fetch(
+        `${baseUrl}/admins/regras-globais?t=${Date.now()}`,
+        {
+          headers: { Authorization: `Bearer ${token}` },
+          cache: "no-store",
+        },
+      );
 
       if (resRegras.ok) {
         const regrasGlobais = await resRegras.json();
@@ -150,7 +151,6 @@ export function SimuladorIRPR() {
           try {
             setConfigAno(JSON.parse(regraDoAno.descricao));
           } catch (e) {
-            console.error("Erro ao ler JSON da Regra", e);
             setConfigAno(fallbackConfig);
           }
         } else {
@@ -160,7 +160,7 @@ export function SimuladorIRPR() {
         setConfigAno(fallbackConfig);
       }
     } catch (error) {
-      console.error("Erro ao carregar totais da API", error);
+      console.error("Erro ao carregar da API", error);
       setConfigAno(fallbackConfig);
     } finally {
       setIsLoading(false);
@@ -222,7 +222,7 @@ export function SimuladorIRPR() {
         `Planejamento_IRPF_${currentProducer.nome.split(" ")[0]}_${selectedYear}.pdf`,
       );
     } catch (error) {
-      console.error("Erro ao gerar PDF:", error);
+      console.error("Erro PDF:", error);
     } finally {
       setIsGeneratingPdf(false);
     }
@@ -234,8 +234,12 @@ export function SimuladorIRPR() {
     const deps = parseInt(dependentes) || 0;
     const lucroReal = Math.max(0, rb - dd);
 
-    // Calcula o lucro presumido de forma dinâmica (ex: rb * 0.20)
-    const lucroPresumido = rb * configAno.lucroPresumido;
+    // BLINDAGEM DOS 2000%: Garante que 20.00 vire 0.20 para a matemática.
+    const percentualPresumido =
+      configAno.lucroPresumido > 1
+        ? configAno.lucroPresumido / 100
+        : configAno.lucroPresumido;
+    const lucroPresumido = rb * percentualPresumido;
 
     const deducaoDependentes = deps * 2275.08;
     const tetoEducacao = (deps + 1) * 3561.5;
@@ -257,7 +261,6 @@ export function SimuladorIRPR() {
         Math.min(pgblDigitado, maxPgblReal) -
         deducaoPensao,
     );
-
     const basePresumida = Math.max(
       0,
       lucroPresumido -
@@ -265,11 +268,10 @@ export function SimuladorIRPR() {
         deducaoEducacao -
         deducaoSaude -
         deducaoInss -
-      Math.min(pgblDigitado, maxPgblPresumido) -
+        Math.min(pgblDigitado, maxPgblPresumido) -
         deducaoPensao,
     );
 
-    // Motor Dinâmico da Tabela Progressiva
     const getFaixaIndex = (base: number) => {
       let index = configAno.faixasIrpf.length - 1;
       for (let i = 0; i < configAno.faixasIrpf.length; i++) {
@@ -291,13 +293,14 @@ export function SimuladorIRPR() {
 
     const faixaReal = getFaixaIndex(baseReal);
     const faixaPresumida = getFaixaIndex(basePresumida);
-    
     let impostoReal = Math.max(0, calcularImposto(baseReal, faixaReal));
-    let impostoPresumido = Math.max(0, calcularImposto(basePresumida, faixaPresumida));
+    let impostoPresumido = Math.max(
+      0,
+      calcularImposto(basePresumida, faixaPresumida),
+    );
 
+    // A REGRA DA ISENÇÃO VOLTOU! Se não atingiu o teto, zera o imposto cobrado
     const isObrigadoDeclarar = rb >= configAno.faturamentoMinimo;
-
-    // Se não atingiu o teto de obrigatoriedade, o imposto rural é isento/zero.
     if (!isObrigadoDeclarar) {
       impostoReal = 0;
       impostoPresumido = 0;
@@ -314,10 +317,13 @@ export function SimuladorIRPR() {
       maxPgblReal,
       economiaReal: impostoPresumido - impostoReal,
       economiaPresumida: impostoReal - impostoPresumido,
-      aliquotaEfetivaReal: rb > 0 ? (impostoReal / rb) * 100 : 0,
-      aliquotaEfetivaPresumida: rb > 0 ? (impostoPresumido / rb) * 100 : 0,
+      aliquotaEfetivaReal:
+        rb > 0 && isObrigadoDeclarar ? (impostoReal / rb) * 100 : 0,
+      aliquotaEfetivaPresumida:
+        rb > 0 && isObrigadoDeclarar ? (impostoPresumido / rb) * 100 : 0,
       isObrigadoDeclarar,
-      isObrigadoLcdpr: rb >= configAno.limiteLcdpr
+      isObrigadoLcdpr: rb >= configAno.limiteLcdpr,
+      percentualPresumido, // Usado no visual do card
     };
   }, [
     receitaBruta,
@@ -339,17 +345,17 @@ export function SimuladorIRPR() {
   };
 
   return (
-    <div className="space-y-6 pb-10">
-      {/* CABEÇALHO */}
+    <div
+      className={`space-y-6 pb-10 transition-opacity duration-300 ${isLoading ? "opacity-40 pointer-events-none" : "opacity-100"}`}
+    >
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-gray-800 flex items-center gap-2">
-            <Calculator className="text-agro-secondary" />
-            Simulador de IRPF Rural
+            <Calculator className="text-agro-secondary" /> Simulador de IRPF
+            Rural
           </h1>
           <p className="text-sm text-gray-500 mt-1">
-            Planejamento tributário interativo. Compare o Regime Completo com o
-            Lucro Presumido.
+            Planejamento tributário interativo.
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -359,11 +365,7 @@ export function SimuladorIRPR() {
                 key={ano}
                 onClick={() => setSelectedYear(ano)}
                 disabled={isLoading || isGeneratingPdf}
-                className={`px-4 py-2 text-sm font-bold rounded-lg transition-all ${
-                  selectedYear === ano
-                    ? "bg-agro-secondary text-white shadow-sm"
-                    : "text-gray-500 hover:bg-gray-100"
-                } disabled:opacity-50`}
+                className={`px-4 py-2 text-sm font-bold rounded-lg transition-all ${selectedYear === ano ? "bg-agro-secondary text-white shadow-sm" : "text-gray-500 hover:bg-gray-100"}`}
               >
                 {ano}
               </button>
@@ -372,12 +374,7 @@ export function SimuladorIRPR() {
             <button
               onClick={() => setShowYearDropdown(!showYearDropdown)}
               disabled={isLoading || isGeneratingPdf}
-              className={`p-2 rounded-lg transition-colors flex items-center gap-1 ${
-                showYearDropdown
-                  ? "bg-gray-100 text-gray-800"
-                  : "text-gray-500 hover:bg-gray-100 hover:text-gray-800"
-              }`}
-              title="Explorar mais anos"
+              className={`p-2 rounded-lg transition-colors flex items-center gap-1 ${showYearDropdown ? "bg-gray-100 text-gray-800" : "text-gray-500 hover:bg-gray-100"}`}
             >
               {isLoading ? (
                 <Loader2
@@ -407,11 +404,7 @@ export function SimuladorIRPR() {
                           setSelectedYear(ano);
                           setShowYearDropdown(false);
                         }}
-                        className={`px-2 py-2 text-xs font-bold rounded-lg transition-colors ${
-                          selectedYear === ano
-                            ? "bg-agro-secondary text-white shadow-sm"
-                            : "text-gray-600 hover:bg-gray-100 border border-transparent hover:border-gray-200"
-                        }`}
+                        className={`px-2 py-2 text-xs font-bold rounded-lg transition-colors ${selectedYear === ano ? "bg-agro-secondary text-white shadow-sm" : "text-gray-600 hover:bg-gray-100 border border-transparent"}`}
                       >
                         {ano}
                       </button>
@@ -430,13 +423,12 @@ export function SimuladorIRPR() {
               <Loader2 size={18} className="animate-spin" />
             ) : (
               <FileDown size={18} />
-            )}
-            Gerar Relatório (PDF)
+            )}{" "}
+            Gerar Relatório
           </button>
         </div>
       </div>
 
-      {/* ALERTAS DA RECEITA FEDERAL */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div
           className={`p-4 rounded-xl border flex items-start gap-3 shadow-sm ${calculos.isObrigadoDeclarar ? "bg-rose-50 border-rose-200 text-rose-800" : "bg-emerald-50 border-emerald-200 text-emerald-800"}`}
@@ -462,8 +454,8 @@ export function SimuladorIRPR() {
             <h3 className="font-bold text-sm">Obrigatoriedade do LCDPR</h3>
             <p className="text-xs mt-1 opacity-90 leading-relaxed">
               {calculos.isObrigadoLcdpr
-                ? `O faturamento atingiu a super-regra de ${formatBRL(configAno.limiteLcdpr)}. É obrigatória a entrega do arquivo digital estruturado (LCDPR) e assinatura com e-CPF.`
-                : `Faturamento dentro do limite normal. A apuração pode ser mantida de forma simplificada sem entrega do arquivo digital estruturado.`}
+                ? `O faturamento atingiu a super-regra de ${formatBRL(configAno.limiteLcdpr)}. É obrigatória a entrega do arquivo digital estruturado.`
+                : `Faturamento dentro do limite normal. A apuração pode ser mantida de forma simplificada sem entrega do arquivo digital.`}
             </p>
           </div>
         </div>
@@ -484,22 +476,16 @@ export function SimuladorIRPR() {
                     </span>
                   )}
                 </div>
-                <p className="text-[10px] text-gray-400 mt-0.5">
-                  Pode ser alterado manualmente para testes.
-                </p>
               </div>
               <button
                 onClick={sincronizarDados}
                 disabled={isLoading}
-                title="Puxar dados reais do banco de dados"
-                className="p-2 bg-emerald-50 text-emerald-600 rounded-lg hover:bg-emerald-100 transition-colors disabled:opacity-50 flex items-center gap-2"
+                className="p-2 bg-emerald-50 text-emerald-600 rounded-lg hover:bg-emerald-100 flex items-center gap-2"
               >
                 {isLoading ? (
                   <Loader2 size={16} className="animate-spin" />
                 ) : (
-                  <span title="Dados sincronizados do Livro Caixa">
-                    <RefreshCw size={16} />
-                  </span>
+                  <RefreshCw size={16} />
                 )}
               </button>
             </div>
@@ -572,9 +558,6 @@ export function SimuladorIRPR() {
                   placeholder="0"
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg outline-none text-sm font-bold text-gray-800 focus:border-agro-secondary"
                 />
-                <p className="text-[10px] text-gray-400 leading-tight">
-                  Valor fixo de R$ 2.275,08 por dependente legal/ano.
-                </p>
               </div>
 
               <div className="grid grid-cols-2 gap-4">
@@ -590,7 +573,6 @@ export function SimuladorIRPR() {
                     }
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg outline-none text-sm font-mono text-gray-800 focus:border-agro-secondary"
                   />
-                  <p className="text-[9px] text-gray-400">Sem limite legal.</p>
                 </div>
                 <div className="space-y-1">
                   <label className="text-[10px] font-bold text-gray-600 uppercase">
@@ -604,9 +586,6 @@ export function SimuladorIRPR() {
                     }
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg outline-none text-sm font-mono text-gray-800 focus:border-agro-secondary"
                   />
-                  <p className="text-[9px] text-emerald-600 font-semibold">
-                    Teto: {formatBRL(calculos.tetoEducacao)}
-                  </p>
                 </div>
                 <div className="space-y-1">
                   <label className="text-[10px] font-bold text-gray-600 uppercase">
@@ -620,7 +599,6 @@ export function SimuladorIRPR() {
                     }
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg outline-none text-sm font-mono text-gray-800 focus:border-agro-secondary"
                   />
-                  <p className="text-[9px] text-gray-400">Sem limite legal.</p>
                 </div>
                 <div className="space-y-1">
                   <label className="text-[10px] font-bold text-gray-600 uppercase">
@@ -634,9 +612,6 @@ export function SimuladorIRPR() {
                     }
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg outline-none text-sm font-mono text-gray-800 focus:border-agro-secondary"
                   />
-                  <p className="text-[9px] text-emerald-600 font-semibold">
-                    Max (Real): {formatBRL(calculos.maxPgblReal)}
-                  </p>
                 </div>
               </div>
 
@@ -652,9 +627,6 @@ export function SimuladorIRPR() {
                   }
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg outline-none text-sm font-mono text-gray-800 focus:border-agro-secondary"
                 />
-                <p className="text-[10px] text-gray-400">
-                  Sem limite, desde que estabelecida por decisão judicial.
-                </p>
               </div>
             </div>
           </div>
@@ -665,7 +637,7 @@ export function SimuladorIRPR() {
           className="xl:col-span-8 space-y-6 p-2 -m-2"
         >
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {/* CARD: RESULTADO REAL */}
+            {/* CARTÃO REGIME REAL */}
             <div
               className={`relative overflow-hidden p-6 rounded-2xl border-2 transition-all ${calculos.impostoReal <= calculos.impostoPresumido ? "bg-emerald-50 border-emerald-500 shadow-lg" : "bg-white border-gray-200 opacity-90"}`}
             >
@@ -686,7 +658,7 @@ export function SimuladorIRPR() {
                 Regime Completo (Real)
               </h3>
               <p className="text-xs text-gray-500 mb-6 border-b border-gray-200 pb-4">
-                Apuração exata via Livro Caixa Documentado.
+                Apuração exata via Livro Caixa.
               </p>
 
               <div className="space-y-3 mb-6">
@@ -697,7 +669,7 @@ export function SimuladorIRPR() {
                   </span>
                 </div>
                 <div className="flex justify-between text-sm">
-                  <span className="text-gray-500">Faixa Aplicada (IR):</span>
+                  <span className="text-gray-500">Faixa Aplicada:</span>
                   <span className="font-mono font-bold text-gray-800">
                     {getFaixaLabel(calculos.faixaReal)}
                   </span>
@@ -719,19 +691,14 @@ export function SimuladorIRPR() {
                 <p
                   className={`text-3xl font-black font-mono ${calculos.impostoReal === 0 ? "text-emerald-600" : "text-gray-900"}`}
                 >
-                  {!calculos.isObrigadoDeclarar ? "ISENTO" : formatBRL(calculos.impostoReal)}
+                  {!calculos.isObrigadoDeclarar
+                    ? "ISENTO"
+                    : formatBRL(calculos.impostoReal)}
                 </p>
               </div>
-
-              {calculos.economiaReal > 0 && (
-                <div className="mt-4 flex items-center gap-2 text-emerald-600 text-sm font-bold bg-emerald-100/50 p-2.5 rounded-lg border border-emerald-200">
-                  <TrendingDown size={16} /> Economia de{" "}
-                  {formatBRL(calculos.economiaReal)}
-                </div>
-              )}
             </div>
 
-            {/* CARD: LUCRO PRESUMIDO */}
+            {/* CARTÃO LUCRO PRESUMIDO */}
             <div
               className={`relative overflow-hidden p-6 rounded-2xl border-2 transition-all ${calculos.impostoPresumido < calculos.impostoReal ? "bg-blue-50 border-blue-500 shadow-lg" : "bg-white border-gray-200 opacity-90"}`}
             >
@@ -749,10 +716,11 @@ export function SimuladorIRPR() {
                       : "text-gray-400"
                   }
                 />
-                Lucro Presumido ({(configAno.lucroPresumido * 100).toFixed(0)}%)
+                Lucro Presumido (
+                {(calculos.percentualPresumido * 100).toFixed(0)}%)
               </h3>
               <p className="text-xs text-gray-500 mb-6 border-b border-gray-200 pb-4">
-                Isenção de comprovação das despesas de custeio.
+                Isenção de comprovação das despesas.
               </p>
 
               <div className="space-y-3 mb-6">
@@ -763,7 +731,7 @@ export function SimuladorIRPR() {
                   </span>
                 </div>
                 <div className="flex justify-between text-sm">
-                  <span className="text-gray-500">Faixa Aplicada (IR):</span>
+                  <span className="text-gray-500">Faixa Aplicada:</span>
                   <span className="font-mono font-bold text-gray-800">
                     {getFaixaLabel(calculos.faixaPresumida)}
                   </span>
@@ -785,26 +753,20 @@ export function SimuladorIRPR() {
                 <p
                   className={`text-3xl font-black font-mono ${calculos.impostoPresumido === 0 ? "text-blue-600" : "text-gray-900"}`}
                 >
-                  {!calculos.isObrigadoDeclarar ? "ISENTO" : formatBRL(calculos.impostoPresumido)}
+                  {!calculos.isObrigadoDeclarar
+                    ? "ISENTO"
+                    : formatBRL(calculos.impostoPresumido)}
                 </p>
               </div>
-
-              {calculos.economiaPresumida > 0 && (
-                <div className="mt-4 flex items-center gap-2 text-blue-600 text-sm font-bold bg-blue-100/50 p-2.5 rounded-lg border border-blue-200">
-                  <TrendingDown size={16} /> Economia de{" "}
-                  {formatBRL(calculos.economiaPresumida)}
-                </div>
-              )}
             </div>
           </div>
 
+          {/* TABELA PROGRESSIVA */}
           <div className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
             <div className="flex items-center gap-2 mb-4">
-              <span title="As deduções abatem a base de cálculo nos dois regimes.">
-                <Info size={18} className="text-gray-400" />
-              </span>
+              <Info size={18} className="text-gray-400" />
               <h3 className="text-base font-bold text-gray-800 uppercase tracking-wider">
-                Tabela Progressiva Anual de IRPF ({selectedYear})
+                Tabela Progressiva Anual ({selectedYear})
               </h3>
             </div>
             <div className="overflow-x-auto rounded-xl border border-gray-200">
@@ -872,11 +834,6 @@ export function SimuladorIRPR() {
                 </tbody>
               </table>
             </div>
-            <p className="text-[10px] text-gray-400 mt-3 flex items-center gap-1">
-              <ArrowRight size={10} /> A base de cálculo final do IRPF é o Lucro
-              da Atividade (Real ou Presumido) reduzido de todas as Deduções
-              Pessoais informadas.
-            </p>
           </div>
         </div>
       </div>

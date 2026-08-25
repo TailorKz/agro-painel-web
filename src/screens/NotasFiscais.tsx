@@ -209,11 +209,13 @@ export function NotasFiscais() {
   const [activePeriod, setActivePeriod] = useState<string | number>(
     periodoInicial,
   );
-const [filtroDedutibilidade, setFiltroDedutibilidade] = useState<
+  const [filtroDedutibilidade, setFiltroDedutibilidade] = useState<
     "todos" | "dedutivel" | "nao_dedutivel"
   >(dedutibilidadeInicial);
 
-  const [filtroConferida, setFiltroConferida] = useState<"todos" | "conferida" | "pendente">("todos");
+  const [filtroConferida, setFiltroConferida] = useState<
+    "todos" | "conferida" | "pendente"
+  >("todos");
 
   const [searchTerm, setSearchTerm] = useState("");
 
@@ -314,8 +316,12 @@ const [filtroDedutibilidade, setFiltroDedutibilidade] = useState<
     });
   };
 
-  const recalcularParcelasManuais = (parcelasArray: any[], totalStr: string) => {
-    const totalNum = parseFloat(totalStr.replace(/\./g, "").replace(",", ".")) || 0;
+  const recalcularParcelasManuais = (
+    parcelasArray: any[],
+    totalStr: string,
+  ) => {
+    const totalNum =
+      parseFloat(totalStr.replace(/\./g, "").replace(",", ".")) || 0;
     const qtd = parcelasArray.length;
     if (qtd === 0) return [];
 
@@ -328,8 +334,11 @@ const [filtroDedutibilidade, setFiltroDedutibilidade] = useState<
         valorFinal = Number((totalNum - soma).toFixed(2));
       }
       soma += valorFinal;
-      
-      const valorMascarado = valorFinal.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+      const valorMascarado = valorFinal.toLocaleString("pt-BR", {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      });
       return { ...p, valor: valorMascarado };
     });
   };
@@ -369,12 +378,13 @@ const [filtroDedutibilidade, setFiltroDedutibilidade] = useState<
     );
   }, [fornecedores, manualForm.empresaEnvolvida]);
 
-
   // --- ESTADOS DA ESTAÇÃO DE ESCANEAMENTO ---
   const [isScannerModalOpen, setIsScannerModalOpen] = useState(false);
   const [scannedCode, setScannedCode] = useState("");
   const [isProcessingScan, setIsProcessingScan] = useState(false);
-  const [scanHistory, setScanHistory] = useState<{code: string, status: "success" | "error", message: string}[]>([]);
+  const [scanHistory, setScanHistory] = useState<
+    { code: string; status: "success" | "error"; message: string }[]
+  >([]);
   const scannerInputRef = useRef<HTMLInputElement>(null);
 
   // Trava o foco no input automaticamente para o contador não precisar usar o mouse
@@ -390,59 +400,94 @@ const [filtroDedutibilidade, setFiltroDedutibilidade] = useState<
   const handleProcessarScan = async (e: React.FormEvent) => {
     e.preventDefault(); // Impede a página de recarregar com o 'Enter' do leitor
     if (!scannedCode.trim() || isProcessingScan || !currentProducer) return;
-    
+
     setIsProcessingScan(true);
     const rawCode = scannedCode;
     setScannedCode(""); // Limpa o input imediatamente para o próximo tiro do leitor!
-    
-    // Inteligência: Tenta extrair 44 dígitos seguidos. 
+
+    // Inteligência: Tenta extrair 44 dígitos seguidos.
     // Isso é útil se o contador ler o QR Code da NFC-e, que muitas vezes é uma URL inteira.
     const match = rawCode.match(/\d{44}/);
     const chaveAcesso = match ? match[0] : rawCode.replace(/\D/g, "");
 
     if (chaveAcesso.length !== 44) {
-       setScanHistory(prev => [{ code: chaveAcesso || rawCode, status: "error", message: "Código inválido. A chave precisa ter 44 dígitos." }, ...prev]);
-       setIsProcessingScan(false);
-       scannerInputRef.current?.focus();
-       return;
+      setScanHistory((prev) => [
+        {
+          code: chaveAcesso || rawCode,
+          status: "error",
+          message: "Código inválido. A chave precisa ter 44 dígitos.",
+        },
+        ...prev,
+      ]);
+      setIsProcessingScan(false);
+      scannerInputRef.current?.focus();
+      return;
     }
 
     try {
-       const token = localStorage.getItem("@AgroPops:token");
-       
-       const response = await fetch(`${baseUrl}/notas/importar-chave/${currentProducer.id}`, {
-         method: "POST",
-         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-         body: JSON.stringify({ chave: chaveAcesso, propriedadeId: currentProperty?.id || null })
-       });
+      const token = localStorage.getItem("@AgroPops:token");
 
-       if (response.ok) {
-         // O Java retorna a nova nota zerada (Rascunho)
-         const novaNotaServidor = await response.json(); 
-         
-         // INJEÇÃO INSTANTÂNEA: Coloca a nota no topo da tela sem baixar tudo de novo!
-         setNotas(prev => [novaNotaServidor, ...prev]);
+      const response = await fetch(
+        `${baseUrl}/notas/importar-chave/${currentProducer.id}`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            chave: chaveAcesso,
+            propriedadeId: currentProperty?.id || null,
+          }),
+        },
+      );
 
-         setScanHistory(prev => [{ code: chaveAcesso, status: "success", message: `Nota ${novaNotaServidor.numero} inserida!` }, ...prev]);
-         
-       } else {
-         // CORREÇÃO: Traduz o Erro 500 do Spring Boot para uma mensagem amigável
-         const errText = await response.text();
-         let msgFinal = "Falha ao processar na SEFAZ.";
-         
-         if (errText.includes("500") || errText.includes("Internal Server Error")) {
-            msgFinal = "⚠️ Atenção: Esta nota já foi importada!";
-         } else if (errText) {
-            msgFinal = errText;
-         }
+      if (response.ok) {
+        // O Java retorna a nova nota zerada (Rascunho)
+        const novaNotaServidor = await response.json();
 
-         setScanHistory(prev => [{ code: chaveAcesso, status: "error", message: msgFinal }, ...prev]);
-       }
+        // INJEÇÃO INSTANTÂNEA: Coloca a nota no topo da tela sem baixar tudo de novo!
+        setNotas((prev) => [novaNotaServidor, ...prev]);
+
+        setScanHistory((prev) => [
+          {
+            code: chaveAcesso,
+            status: "success",
+            message: `Nota ${novaNotaServidor.numero} inserida!`,
+          },
+          ...prev,
+        ]);
+      } else {
+        // CORREÇÃO: Traduz o Erro 500 do Spring Boot para uma mensagem amigável
+        const errText = await response.text();
+        let msgFinal = "Falha ao processar na SEFAZ.";
+
+        if (
+          errText.includes("500") ||
+          errText.includes("Internal Server Error")
+        ) {
+          msgFinal = "⚠️ Atenção: Esta nota já foi importada!";
+        } else if (errText) {
+          msgFinal = errText;
+        }
+
+        setScanHistory((prev) => [
+          { code: chaveAcesso, status: "error", message: msgFinal },
+          ...prev,
+        ]);
+      }
     } catch (error) {
-       setScanHistory(prev => [{ code: chaveAcesso, status: "error", message: "Erro de conexão com o servidor." }, ...prev]);
+      setScanHistory((prev) => [
+        {
+          code: chaveAcesso,
+          status: "error",
+          message: "Erro de conexão com o servidor.",
+        },
+        ...prev,
+      ]);
     } finally {
-       setIsProcessingScan(false);
-       scannerInputRef.current?.focus(); // Devolve o foco pro leitor não parar
+      setIsProcessingScan(false);
+      scannerInputRef.current?.focus(); // Devolve o foco pro leitor não parar
     }
   };
 
@@ -461,8 +506,12 @@ const [filtroDedutibilidade, setFiltroDedutibilidade] = useState<
 
   const handleRemoveParcelaManual = (id: number) => {
     const filtradas = manualParcelas.filter((p) => p.id !== id);
-    filtradas.forEach((p, i) => (p.numeroParcela = String(i + 1).padStart(3, "0")));
-    setManualParcelas(recalcularParcelasManuais(filtradas, manualForm.valorTotal));
+    filtradas.forEach(
+      (p, i) => (p.numeroParcela = String(i + 1).padStart(3, "0")),
+    );
+    setManualParcelas(
+      recalcularParcelasManuais(filtradas, manualForm.valorTotal),
+    );
   };
 
   const handleSalvarNotaManual = async (e: React.FormEvent) => {
@@ -779,7 +828,7 @@ const [filtroDedutibilidade, setFiltroDedutibilidade] = useState<
         }
         setSelectedNotaModal(data);
 
-        setTempObs(data.observacao || ""); 
+        setTempObs(data.observacao || "");
         setIsEditingObs(false);
 
         if (!preserveTab) setActiveTabModal("itens");
@@ -950,26 +999,29 @@ const [filtroDedutibilidade, setFiltroDedutibilidade] = useState<
 
   // AUDITORIA E RESTAURAÇÃO
 
-
   // ========================================================
   // AUDITORIA COM ATUALIZAÇÃO OTIMISTA E CACHE (OPTIMISTIC UI)
   // ========================================================
-  const handleToggleConferida = async (e: React.MouseEvent, id: number, valorAtual: boolean) => {
+  const handleToggleConferida = async (
+    e: React.MouseEvent,
+    id: number,
+    valorAtual: boolean,
+  ) => {
     e.preventDefault();
-    e.stopPropagation(); 
+    e.stopPropagation();
 
     const novoValor = !valorAtual;
 
     // 1. ATUALIZAÇÃO IMEDIATA NA TELA E NO CACHE (Sem esperar o servidor)
     setNotas((prev) => {
-      const novasNotas = prev.map((nota) => 
-        nota.id === id ? { ...nota, conferida: novoValor } : nota
+      const novasNotas = prev.map((nota) =>
+        nota.id === id ? { ...nota, conferida: novoValor } : nota,
       );
       // PADRÃO OURO: Atualiza o cache local para não piscar o antigo quando voltar!
       if (currentProducer) {
         localStorage.setItem(
           chaveCacheNotas(currentProducer.id, activePeriod),
-          JSON.stringify(novasNotas)
+          JSON.stringify(novasNotas),
         );
       }
       return novasNotas;
@@ -985,7 +1037,10 @@ const [filtroDedutibilidade, setFiltroDedutibilidade] = useState<
       const token = localStorage.getItem("@AgroPops:token");
       const response = await fetch(`${baseUrl}/notas/${id}/conferida`, {
         method: "PUT",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
         body: JSON.stringify({ conferida: novoValor }),
       });
 
@@ -1005,13 +1060,16 @@ const [filtroDedutibilidade, setFiltroDedutibilidade] = useState<
       const token = localStorage.getItem("@AgroPops:token");
       await fetch(`${baseUrl}/notas/${selectedNotaModal.id}/observacao`, {
         method: "PUT",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
         body: JSON.stringify({ observacao: tempObs }), // <-- Usa o texto temporário
       });
-      
+
       setSelectedNotaModal({ ...selectedNotaModal, observacao: tempObs });
       setIsEditingObs(false); // Fecha o modo de edição ao terminar
-      
+
       buscarNotas();
     } catch (error) {
       console.error(error);
@@ -1083,11 +1141,11 @@ const [filtroDedutibilidade, setFiltroDedutibilidade] = useState<
     const matchesSearch =
       nota.empresaEnvolvida.toLowerCase().includes(searchTerm.toLowerCase()) ||
       nota.numero.toLowerCase().includes(searchTerm.toLowerCase());
-      
+
     // Filtro de Tipo (Entrada/Saída)
     const matchesTab =
       activeTab === "todas" || nota.tipo.toLowerCase() === activeTab;
-      
+
     // Filtro de Dedutibilidade (Apenas se for Saída)
     let matchesDedutibilidade = true;
     if (activeTab === "saida" && filtroDedutibilidade !== "todos") {
@@ -1100,12 +1158,15 @@ const [filtroDedutibilidade, setFiltroDedutibilidade] = useState<
     // Filtro de Auditoria (Conferidas/Pendentes)
     let matchesConferida = true;
     if (filtroConferida !== "todos") {
-      if (filtroConferida === "conferida") matchesConferida = nota.conferida === true;
+      if (filtroConferida === "conferida")
+        matchesConferida = nota.conferida === true;
       if (filtroConferida === "pendente") matchesConferida = !nota.conferida; // null ou false
     }
 
     // Só exibe a nota se ela passar em todas as travas
-    return matchesSearch && matchesTab && matchesDedutibilidade && matchesConferida;
+    return (
+      matchesSearch && matchesTab && matchesDedutibilidade && matchesConferida
+    );
   });
 
   const formatBRL = (valor: number) =>
@@ -1263,7 +1324,7 @@ const [filtroDedutibilidade, setFiltroDedutibilidade] = useState<
           </div>
         </div>
       </div>
-<div className="bg-white p-4 rounded-2xl border border-gray-100 shadow-sm flex flex-col gap-4">
+      <div className="bg-white p-4 rounded-2xl border border-gray-100 shadow-sm flex flex-col gap-4">
         <div className="flex flex-col md:flex-row gap-4 items-center w-full">
           <div className="flex-1 relative w-full">
             <Search
@@ -1304,7 +1365,6 @@ const [filtroDedutibilidade, setFiltroDedutibilidade] = useState<
         {/* BARRA DE FILTROS AVANÇADOS (AUDITORIA E LIVRO CAIXA)      */}
         {/* ========================================================= */}
         <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-3 pt-3 border-t border-gray-100 mt-2">
-          
           {/* FILTRO 1: AUDITORIA (Sempre visível) */}
           <div className="flex items-center flex-wrap gap-2">
             <span className="text-sm font-semibold text-gray-500 mr-2 flex items-center gap-1">
@@ -1373,7 +1433,9 @@ const [filtroDedutibilidade, setFiltroDedutibilidade] = useState<
           <table className="w-full text-left border-collapse">
             <thead>
               <tr className="bg-gray-50 border-b border-gray-100 text-sm text-gray-500">
-                <th className="px-6 py-4 font-medium text-center w-24">Auditoria</th>
+                <th className="px-6 py-4 font-medium text-center w-24">
+                  Auditoria
+                </th>
                 <th className="px-6 py-4 font-medium">Empresa Envolvida</th>
                 <th className="px-6 py-4 font-medium">Data Emissão</th>
                 <th className="px-6 py-4 font-medium">Itens na Nota</th>
@@ -1394,17 +1456,27 @@ const [filtroDedutibilidade, setFiltroDedutibilidade] = useState<
                   >
                     {/* AUDITORIA */}
                     <td className="px-6 py-4 text-center">
-                      
                       <button
-                        onClick={(e) => handleToggleConferida(e, nota.id, nota.conferida || false)}
+                        onClick={(e) =>
+                          handleToggleConferida(
+                            e,
+                            nota.id,
+                            nota.conferida || false,
+                          )
+                        }
                         className={`flex items-center justify-center w-full gap-1.5 px-2 py-1.5 rounded-lg text-[10px] font-bold transition-all border uppercase tracking-wider ${
                           nota.conferida
                             ? "bg-emerald-100 text-emerald-700 border-emerald-200"
                             : "bg-gray-50 text-gray-400 border-gray-200 hover:bg-emerald-50 hover:text-emerald-600"
                         }`}
-                        title={nota.conferida ? "Desmarcar conferência" : "Marcar nota como Conferida"}
+                        title={
+                          nota.conferida
+                            ? "Desmarcar conferência"
+                            : "Marcar nota como Conferida"
+                        }
                       >
-                        <CheckCircle size={14} /> {nota.conferida ? "Conferido" : "Pendente"}
+                        <CheckCircle size={14} />{" "}
+                        {nota.conferida ? "Conferido" : "Pendente"}
                       </button>
                     </td>
                     <td className="px-6 py-4">
@@ -1476,7 +1548,6 @@ const [filtroDedutibilidade, setFiltroDedutibilidade] = useState<
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-6xl overflow-hidden flex flex-col max-h-[90vh]">
             {/* CABEÇALHO DO MODAL */}
             <div className="p-6 border-b border-gray-100 flex items-start justify-between bg-gray-50">
-              
               {/* Lado Esquerdo: Ícone e Título */}
               <div className="flex items-center gap-4">
                 <div className="w-12 h-12 bg-agro-secondary/10 text-agro-secondary rounded-xl flex items-center justify-center shrink-0 shadow-inner border border-emerald-100">
@@ -1520,19 +1591,25 @@ const [filtroDedutibilidade, setFiltroDedutibilidade] = useState<
               {/* Lado Direito: Ações (Auditoria e Fechar) */}
               <div className="flex items-center gap-4">
                 <button
-                  onClick={(e) => handleToggleConferida(e, selectedNotaModal.id, selectedNotaModal.conferida || false)}
+                  onClick={(e) =>
+                    handleToggleConferida(
+                      e,
+                      selectedNotaModal.id,
+                      selectedNotaModal.conferida || false,
+                    )
+                  }
                   className={`flex items-center gap-1.5 px-4 py-2 rounded-full text-[11px] font-bold transition-all shadow-sm border uppercase tracking-wider ${
-                    selectedNotaModal.conferida 
-                    ? "bg-emerald-500 text-white border-emerald-600" 
-                    : "bg-white text-gray-500 border-gray-200 hover:bg-emerald-50 hover:text-emerald-700 hover:border-emerald-200"
+                    selectedNotaModal.conferida
+                      ? "bg-emerald-500 text-white border-emerald-600"
+                      : "bg-white text-gray-500 border-gray-200 hover:bg-emerald-50 hover:text-emerald-700 hover:border-emerald-200"
                   }`}
                 >
-                  <CheckCircle size={16} /> 
-                  {selectedNotaModal.conferida ? "Nota Conferida" : "Marcar como Conferida"}
+                  <CheckCircle size={16} />
+                  {selectedNotaModal.conferida
+                    ? "Nota Conferida"
+                    : "Marcar como Conferida"}
                 </button>
-
                 <div className="w-px h-6 bg-gray-200" /> {/* Divisor visual */}
-
                 <button
                   onClick={handleCloseNotaModal}
                   className="p-2 hover:bg-gray-200 rounded-lg text-gray-500 transition-colors"
@@ -1541,7 +1618,6 @@ const [filtroDedutibilidade, setFiltroDedutibilidade] = useState<
                   <X size={24} />
                 </button>
               </div>
-
             </div>
 
             {/* BARRA DE INFORMAÇÕES DETALHADAS (FONTE DE VERDADE DO XML) */}
@@ -1599,55 +1675,63 @@ const [filtroDedutibilidade, setFiltroDedutibilidade] = useState<
                   </p>
                 </div>
               </div>
-             {/* ================= CAMPO DE OBSERVAÇÃO ================= */}
-               <div className="mt-4 bg-gray-50 p-4 rounded-xl border border-gray-200 shadow-sm flex flex-col gap-2 transition-all">
-                 <div className="flex items-center justify-between">
-                   <label className="text-[10px] font-bold text-gray-500 uppercase tracking-wider flex items-center gap-1.5">
-                     <Edit3 size={14} /> Observações / Apontamentos
-                   </label>
-                   {!isEditingObs && (
-                     <button
-                       onClick={() => {
-                         setTempObs(selectedNotaModal.observacao || "");
-                         setIsEditingObs(true);
-                       }}
-                       className="text-gray-600 hover:text-gray-900 bg-white border border-gray-200 hover:bg-gray-100 px-2.5 py-1 rounded-lg transition-colors flex items-center gap-1.5 text-xs font-bold shadow-sm"
-                     >
-                       <Edit3 size={12} /> Editar
-                     </button>
-                   )}
-                 </div>
+              {/* ================= CAMPO DE OBSERVAÇÃO ================= */}
+              <div className="mt-4 bg-gray-50 p-4 rounded-xl border border-gray-200 shadow-sm flex flex-col gap-2 transition-all">
+                <div className="flex items-center justify-between">
+                  <label className="text-[10px] font-bold text-gray-500 uppercase tracking-wider flex items-center gap-1.5">
+                    <Edit3 size={14} /> Observações / Apontamentos
+                  </label>
+                  {!isEditingObs && (
+                    <button
+                      onClick={() => {
+                        setTempObs(selectedNotaModal.observacao || "");
+                        setIsEditingObs(true);
+                      }}
+                      className="text-gray-600 hover:text-gray-900 bg-white border border-gray-200 hover:bg-gray-100 px-2.5 py-1 rounded-lg transition-colors flex items-center gap-1.5 text-xs font-bold shadow-sm"
+                    >
+                      <Edit3 size={12} /> Editar
+                    </button>
+                  )}
+                </div>
 
-                 {isEditingObs ? (
-                   <div className="flex items-end gap-2 mt-1 animate-in fade-in slide-in-from-top-1 duration-200">
-                     <textarea
-                       className="w-full bg-white border border-gray-300 rounded-lg p-3 text-sm font-medium text-gray-800 outline-none resize-none placeholder:text-gray-400 focus:border-agro-secondary focus:ring-2 focus:ring-agro-secondary/20 transition-all shadow-inner"
-                       rows={2}
-                       placeholder="Adicione detalhes, justificativas ou apontamentos internos sobre esta nota..."
-                       value={tempObs}
-                       onChange={(e) => setTempObs(e.target.value)}
-                       autoFocus
-                     />
-                     <button
-                       onClick={handleSalvarObservacao}
-                       className="h-11 px-4 bg-slate-800 hover:bg-slate-900 text-white rounded-lg flex items-center justify-center transition-colors shadow-sm shrink-0 group"
-                       title="Salvar Observação"
-                     >
-                       <CornerDownLeft size={20} strokeWidth={2.5} className="group-hover:-translate-x-0.5 group-hover:translate-y-0.5 transition-transform" />
-                     </button>
-                   </div>
-                 ) : (
-                   <div className="text-sm text-gray-700 mt-1 bg-white p-3 rounded-lg border border-gray-100 shadow-inner min-h-[44px]">
-                     {selectedNotaModal.observacao ? (
-                       <p className="whitespace-pre-wrap leading-relaxed">{selectedNotaModal.observacao}</p>
-                     ) : (
-                       <p className="text-gray-400 italic">Nenhuma observação registrada nesta nota.</p>
-                     )}
-                   </div>
-                 )}
-               </div>
-               {/* ======================================================= */}
-  
+                {isEditingObs ? (
+                  <div className="flex items-end gap-2 mt-1 animate-in fade-in slide-in-from-top-1 duration-200">
+                    <textarea
+                      className="w-full bg-white border border-gray-300 rounded-lg p-3 text-sm font-medium text-gray-800 outline-none resize-none placeholder:text-gray-400 focus:border-agro-secondary focus:ring-2 focus:ring-agro-secondary/20 transition-all shadow-inner"
+                      rows={2}
+                      placeholder="Adicione detalhes, justificativas ou apontamentos internos sobre esta nota..."
+                      value={tempObs}
+                      onChange={(e) => setTempObs(e.target.value)}
+                      autoFocus
+                    />
+                    <button
+                      onClick={handleSalvarObservacao}
+                      className="h-11 px-4 bg-slate-800 hover:bg-slate-900 text-white rounded-lg flex items-center justify-center transition-colors shadow-sm shrink-0 group"
+                      title="Salvar Observação"
+                    >
+                      <CornerDownLeft
+                        size={20}
+                        strokeWidth={2.5}
+                        className="group-hover:-translate-x-0.5 group-hover:translate-y-0.5 transition-transform"
+                      />
+                    </button>
+                  </div>
+                ) : (
+                  <div className="text-sm text-gray-700 mt-1 bg-white p-3 rounded-lg border border-gray-100 shadow-inner min-h-[44px]">
+                    {selectedNotaModal.observacao ? (
+                      <p className="whitespace-pre-wrap leading-relaxed">
+                        {selectedNotaModal.observacao}
+                      </p>
+                    ) : (
+                      <p className="text-gray-400 italic">
+                        Nenhuma observação registrada nesta nota.
+                      </p>
+                    )}
+                  </div>
+                )}
+              </div>
+              {/* ======================================================= */}
+
               {selectedNotaModal.chaveAcessoReferencia && (
                 <div className="p-2.5 bg-sky-50 border border-sky-100 rounded-lg flex items-center gap-2 w-fit pr-6">
                   <RotateCcw size={16} className="text-sky-600 shrink-0" />
@@ -1855,7 +1939,7 @@ const [filtroDedutibilidade, setFiltroDedutibilidade] = useState<
                     </div>
                   </div>
 
-                  <div className="border border-gray-100 rounded-xl overflow-hidden">
+                  <div className="border border-gray-100 rounded-xl overflow-visible">
                     <table className="w-full text-left border-collapse">
                       <thead>
                         <tr className="bg-gray-50 border-b border-gray-100 text-xs text-gray-500 uppercase">
@@ -1891,19 +1975,49 @@ const [filtroDedutibilidade, setFiltroDedutibilidade] = useState<
                                 className="hover:bg-blue-50/20 transition-colors"
                               >
                                 <td className="px-4 py-3 text-sm font-bold text-gray-700 font-mono">
-                                  <input
-                                    type="text"
-                                    value={parcela.numeroParcela}
-                                    onChange={(e) => {
-                                      const newVal = e.target.value;
-                                      setSelectedNotaModal((prev: any) => {
-                                        const p = [...prev.parcelas];
-                                        p[index].numeroParcela = newVal;
-                                        return { ...prev, parcelas: p };
-                                      });
-                                    }}
-                                    className="w-16 px-2 py-1 border border-gray-200 rounded text-center outline-none focus:border-blue-400"
-                                  />
+                                  <div className="flex items-center gap-1.5">
+                                    <input
+                                      type="text"
+                                      value={parcela.numeroParcela}
+                                      readOnly={
+                                        parcela.numeroParcela === "RET/AV"
+                                      } // <-- TRAVA A EDIÇÃO AQUI
+                                      onChange={(e) => {
+                                        const newVal = e.target.value;
+                                        setSelectedNotaModal((prev: any) => {
+                                          const p = [...prev.parcelas];
+                                          p[index].numeroParcela = newVal;
+                                          return { ...prev, parcelas: p };
+                                        });
+                                      }}
+                                      className={`w-16 px-2 py-1 border rounded text-center outline-none transition-colors ${
+                                        parcela.numeroParcela === "RET/AV"
+                                          ? "border-amber-300 bg-amber-50 text-amber-800 cursor-not-allowed" // <-- VISUAL DE BLOQUEADO
+                                          : "border-gray-200 focus:border-blue-400"
+                                      }`}
+                                    />
+
+                                    {parcela.numeroParcela === "RET/AV" && (
+                                      <div className="relative group flex items-center">
+                                        <Info
+                                          size={16}
+                                          className="text-amber-500 cursor-help"
+                                        />
+
+                                        {/* TOOLTIP ABRINDO PARA A DIREITA (Não corta no topo) */}
+                                        <div className="absolute top-1/2 -translate-y-1/2 left-full ml-3 hidden group-hover:block w-56 p-3 bg-gray-900 text-white text-xs font-sans font-normal leading-relaxed rounded-xl shadow-2xl z-[999] pointer-events-none">
+                                          <span className="font-bold text-amber-400 mb-1 block">
+                                            Retenção / À Vista:
+                                          </span>
+                                          Diferença gerada pelo sistema para
+                                          fechar o valor da nota (ex: FUNRURAL,
+                                          impostos ou entrada à vista).
+                                          {/* Setinha do balão apontando para a esquerda */}
+                                          <div className="absolute top-1/2 -translate-y-1/2 right-full border-4 border-transparent border-r-gray-900" />
+                                        </div>
+                                      </div>
+                                    )}
+                                  </div>
                                 </td>
                                 <td className="px-4 py-3">
                                   <input
@@ -2240,17 +2354,21 @@ const [filtroDedutibilidade, setFiltroDedutibilidade] = useState<
                       placeholder="0,00"
                       value={manualForm.valorTotal}
                       onChange={(e) => {
-                      const val = formatCurrencyInput(e.target.value);
-                      setManualForm({ ...manualForm, valorTotal: val });
-                      
-                      if (showParcelasManual) {
-                        setManualParcelas((prev) => recalcularParcelasManuais(prev, val));
-                      } else {
-                        setManualParcelas((prev) =>
-                          prev.map((p, i) => (i === 0 ? { ...p, valor: val } : p)),
-                        );
-                      }
-                    }}
+                        const val = formatCurrencyInput(e.target.value);
+                        setManualForm({ ...manualForm, valorTotal: val });
+
+                        if (showParcelasManual) {
+                          setManualParcelas((prev) =>
+                            recalcularParcelasManuais(prev, val),
+                          );
+                        } else {
+                          setManualParcelas((prev) =>
+                            prev.map((p, i) =>
+                              i === 0 ? { ...p, valor: val } : p,
+                            ),
+                          );
+                        }
+                      }}
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg outline-none text-lg font-mono font-bold focus:border-agro-secondary text-right text-gray-800"
                     />
                   </div>
@@ -2928,7 +3046,7 @@ const [filtroDedutibilidade, setFiltroDedutibilidade] = useState<
           <div className="bg-white rounded-3xl shadow-2xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[85vh]">
             <div className="p-6 border-b border-gray-100 flex items-center justify-between bg-blue-600">
               <h2 className="text-xl font-bold text-white flex items-center gap-3">
-                <ScanBarcode size={24} className="animate-pulse" /> 
+                <ScanBarcode size={24} className="animate-pulse" />
                 Estação de Leitura
               </h2>
               <button
@@ -2941,15 +3059,20 @@ const [filtroDedutibilidade, setFiltroDedutibilidade] = useState<
 
             <div className="p-8 flex flex-col gap-6 bg-gray-50">
               <div className="text-center space-y-2">
-                <h3 className="text-lg font-bold text-gray-800">Aproxime o leitor do Código de Barras ou QR Code</h3>
+                <h3 className="text-lg font-bold text-gray-800">
+                  Aproxime o leitor do Código de Barras ou QR Code
+                </h3>
                 <p className="text-sm text-gray-500">
-                  O sistema reconhecerá notas e cupons em sequência. Você não precisa usar o mouse.
+                  O sistema reconhecerá notas e cupons em sequência. Você não
+                  precisa usar o mouse.
                 </p>
               </div>
 
               {/* O INPUT QUE CAPTURA O LEITOR */}
               <form onSubmit={handleProcessarScan} className="relative">
-                <div className={`absolute -inset-1 rounded-2xl blur opacity-30 transition-all duration-300 ${isProcessingScan ? 'bg-blue-400' : 'bg-blue-500'}`}></div>
+                <div
+                  className={`absolute -inset-1 rounded-2xl blur opacity-30 transition-all duration-300 ${isProcessingScan ? "bg-blue-400" : "bg-blue-500"}`}
+                ></div>
                 <input
                   ref={scannerInputRef}
                   type="text"
@@ -2961,7 +3084,8 @@ const [filtroDedutibilidade, setFiltroDedutibilidade] = useState<
                   autoFocus
                   onBlur={() => {
                     // Mantém o input focado sempre, a menos que o usuário feche a tela
-                    if (isScannerModalOpen) setTimeout(() => scannerInputRef.current?.focus(), 500);
+                    if (isScannerModalOpen)
+                      setTimeout(() => scannerInputRef.current?.focus(), 500);
                   }}
                 />
                 {isProcessingScan && (
@@ -2974,8 +3098,10 @@ const [filtroDedutibilidade, setFiltroDedutibilidade] = useState<
 
             {/* FEEDBACK DOS ÚLTIMOS SCANS */}
             <div className="flex-1 bg-white border-t border-gray-100 overflow-y-auto p-4">
-              <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-4 px-2">Histórico da Sessão ({scanHistory.length})</p>
-              
+              <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-4 px-2">
+                Histórico da Sessão ({scanHistory.length})
+              </p>
+
               {scanHistory.length === 0 ? (
                 <div className="flex flex-col items-center justify-center py-10 text-gray-300">
                   <ScanBarcode size={48} className="mb-2 opacity-50" />
@@ -2984,15 +3110,29 @@ const [filtroDedutibilidade, setFiltroDedutibilidade] = useState<
               ) : (
                 <div className="space-y-2">
                   {scanHistory.map((hist, i) => (
-                    <div key={i} className={`flex items-start gap-3 p-3 rounded-xl border ${hist.status === 'success' ? 'bg-emerald-50 border-emerald-100' : 'bg-rose-50 border-rose-100'} animate-in slide-in-from-top-2`}>
+                    <div
+                      key={i}
+                      className={`flex items-start gap-3 p-3 rounded-xl border ${hist.status === "success" ? "bg-emerald-50 border-emerald-100" : "bg-rose-50 border-rose-100"} animate-in slide-in-from-top-2`}
+                    >
                       <div className="mt-0.5">
-                        {hist.status === 'success' ? <CheckCircle size={18} className="text-emerald-600" /> : <AlertCircle size={18} className="text-rose-600" />}
+                        {hist.status === "success" ? (
+                          <CheckCircle size={18} className="text-emerald-600" />
+                        ) : (
+                          <AlertCircle size={18} className="text-rose-600" />
+                        )}
                       </div>
                       <div>
-                        <p className={`text-sm font-bold ${hist.status === 'success' ? 'text-emerald-800' : 'text-rose-800'}`}>
+                        <p
+                          className={`text-sm font-bold ${hist.status === "success" ? "text-emerald-800" : "text-rose-800"}`}
+                        >
                           {hist.message}
                         </p>
-                        <p className="text-xs font-mono text-gray-500 mt-0.5">Chave: {hist.code.length > 20 ? `${hist.code.substring(0, 10)}...${hist.code.substring(hist.code.length - 10)}` : hist.code}</p>
+                        <p className="text-xs font-mono text-gray-500 mt-0.5">
+                          Chave:{" "}
+                          {hist.code.length > 20
+                            ? `${hist.code.substring(0, 10)}...${hist.code.substring(hist.code.length - 10)}`
+                            : hist.code}
+                        </p>
                       </div>
                     </div>
                   ))}
