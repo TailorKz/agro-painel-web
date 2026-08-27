@@ -39,6 +39,9 @@ type Lancamento = {
   percDedutivel: number;
   valorDedutivel: number;
   conferida?: boolean;
+  propriedadeId?: number | null;
+  nomePropriedade?: string;
+  percentualPropriedade?: number;
 };
 
 const MESES = [
@@ -350,22 +353,29 @@ export function LivroCaixa() {
       saldoAcumulado: 0,
     }));
 
-    const multiplicador = currentProperty
-      ? currentProperty.percentualParticipacao / 100
-      : 1;
-
     lancamentos.forEach((lanc) => {
       const ano = parseInt(lanc.data.split("-")[0]);
       const mes = parseInt(lanc.data.split("-")[1]) - 1;
 
       if (ano === selectedYear) {
+        
+        // 1. FILTRO DE PROPRIEDADE (Esconde notas que não são da propriedade selecionada)
+        // Se currentProperty for nulo (Consolidado), ele pula esse if e mostra tudo
+        if (currentProperty && lanc.propriedadeId !== currentProperty.id) {
+            return; 
+        }
+
+        // 2. FILTRO DE OCULTAR NÃO LANÇADAS
         if (ocultarNaoLancadas) {
           if (lanc.tipo === "SAIDA" && lanc.valorDedutivel === 0) return;
           if (lanc.tipo === "ENTRADA" && lanc.valor === 0) return;
         }
 
-        const valorRateado = lanc.valor * multiplicador;
-        const dedutivelRateado = lanc.valorDedutivel * multiplicador;
+        // 3. pega o percentual dessa nota que veio do Java. Se não tiver, usa 100% (1)
+        const cota = lanc.percentualPropriedade ? lanc.percentualPropriedade / 100 : 1;
+        
+        const valorRateado = lanc.valor * cota;
+        const dedutivelRateado = lanc.valorDedutivel * cota;
 
         agrupado[mes].lancamentos.push({
           ...lanc,
@@ -380,6 +390,7 @@ export function LivroCaixa() {
         }
       }
     });
+
     // Calcula Saldo do Mês e Saldo Acumulado Sequencial
     let acumulado = 0;
     for (let i = 0; i < 12; i++) {

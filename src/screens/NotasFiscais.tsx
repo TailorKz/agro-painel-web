@@ -53,6 +53,7 @@ type NotaFiscal = {
   parcelas?: any[];
   conferida?: boolean;
   observacao?: string;
+  propriedadeId?: number | null;
 };
 
 // NÁLISE DE CFOP (BASEADO NO SUFIXO)
@@ -182,7 +183,7 @@ export function NotasFiscais() {
   const baseUrl = import.meta.env.VITE_API_URL;
   const { currentProducer, currentProperty } = useProducer();
   const location = useLocation();
-
+  const [importarComParcelas, setImportarComParcelas] = useState(true);
   const [divergentes, setDivergentes] = useState<any[]>([]);
   const [arquivosDivergentesMap, setArquivosDivergentesMap] = useState<
     Map<string, File>
@@ -284,6 +285,7 @@ export function NotasFiscais() {
     numero: "",
     valorTotal: "",
     isDedutivel: true,
+    observacao: "",
   });
 
   const handleCloseNotaModal = () => {
@@ -571,6 +573,7 @@ export function NotasFiscais() {
           cpfCnpj: "",
           numero: "",
           valorTotal: "",
+          observacao: "",
         });
         setManualParcelas([
           {
@@ -580,6 +583,7 @@ export function NotasFiscais() {
             valor: "",
           },
         ]);
+        setIsLoadingNotas(true);
         buscarNotas();
       } else {
         alert(await res.text());
@@ -718,6 +722,8 @@ export function NotasFiscais() {
     let mapaArquivosOriginais = new Map(arquivosDivergentesMap);
 
     const tamanhoLote = 20;
+    const promessasLotes = []; // A MÁGICA COMEÇA AQUI: Array para disparar tudo em paralelo
+
     for (let i = 0; i < arquivosParaEnviar.length; i += tamanhoLote) {
       const lote = arquivosParaEnviar.slice(i, i + tamanhoLote);
       const formData = new FormData();
@@ -729,40 +735,37 @@ export function NotasFiscais() {
 
       if (currentProperty)
         formData.append("propriedadeFallbackId", currentProperty.id.toString());
-      if (isForcando) formData.append("forcar", "true"); // Ativa a flag no Java
+      if (isForcando) formData.append("forcar", "true");
+      formData.append("ignorarParcelas", (!importarComParcelas).toString());
 
-      try {
-        const response = await fetch(
-          `${baseUrl}/notas/importar/${currentProducer.id}`,
-          {
-            method: "POST",
-            headers: { Authorization: `Bearer ${token}` },
-            body: formData,
-          },
-        );
-
-        if (response.ok) {
-          const result = await response.json();
-          totalImportadas += result.importadas;
-          totalIgnoradas += result.ignoradas;
-          totalFalhas += result.falhas;
-          if (result.divergentes && result.divergentes.length > 0) {
-            todasDivergentes.push(...result.divergentes);
+      // EMPILHAMOS AS REQUISIÇÕES SEM "AWAIT" PARA NÃO TRAVAR O LAÇO
+      const request = fetch(`${baseUrl}/notas/importar/${currentProducer.id}`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+        body: formData,
+      })
+        .then(async (response) => {
+          if (response.ok) {
+            const result = await response.json();
+            totalImportadas += result.importadas;
+            totalIgnoradas += result.ignoradas;
+            totalFalhas += result.falhas;
+            if (result.divergentes && result.divergentes.length > 0) {
+              todasDivergentes.push(...result.divergentes);
+            }
+          } else {
+            totalFalhas += lote.length;
           }
-        } else {
+        })
+        .catch(() => {
           totalFalhas += lote.length;
-        }
-      } catch (error) {
-        totalFalhas += lote.length;
-      }
+        });
 
-      const loteAtual = Math.ceil((i + 1) / tamanhoLote);
-      const totalLotes = Math.ceil(arquivosParaEnviar.length / tamanhoLote);
-      setUploadMessage({
-        text: `Processando lote ${loteAtual} de ${totalLotes}...`,
-        type: "success",
-      });
+      promessasLotes.push(request);
     }
+
+    // DISPARA TODAS AS REQUISIÇÕES AO MESMO TEMPO PARA O JAVA!
+    await Promise.all(promessasLotes);
 
     // Processamento concluído
     setArquivosDivergentesMap(mapaArquivosOriginais);
@@ -778,8 +781,7 @@ export function NotasFiscais() {
 
     // Se chegou aqui, é porque forçou ou não houve divergências
     let msgFinal = `Concluído: ${totalImportadas} importadas.`;
-    if (totalIgnoradas > 0)
-      msgFinal += ` ${totalIgnoradas} ignoradas (já existiam).`;
+    if (totalIgnoradas > 0) msgFinal += ` ${totalIgnoradas} ignoradas.`;
     if (totalFalhas > 0) msgFinal += ` ${totalFalhas} falhas.`;
 
     setUploadMessage({
@@ -794,10 +796,13 @@ export function NotasFiscais() {
       setDivergentes([]);
       setSelectedDivergentes(new Set());
       setArquivosDivergentesMap(new Map());
-      buscarNotas();
-    }, 3500);
+      
+      // Força a tabela a mostrar o ícone de carregamento imediatamente
+      setIsLoadingNotas(true); 
 
-    setIsUploading(false);
+      buscarNotas();
+      setIsUploading(false);
+    }, 1000);
   };
 
   const aplicarFiltroPersonalizado = () => {
@@ -1117,8 +1122,12 @@ export function NotasFiscais() {
     try {
       const token = localStorage.getItem("@AgroPops:token");
       const parametros = obterParametrosDeData(activePeriod);
+      
+      // Se tiver uma propriedade selecionada, avisa o backend para apagar só as dela
+      const parametroPropriedade = currentProperty ? `&propriedadeId=${currentProperty.id}` : "";
+
       const response = await fetch(
-        `${baseUrl}/notas/deletar-todas/${currentProducer.id}${parametros}`,
+        `${baseUrl}/notas/deletar-todas/${currentProducer.id}${parametros}${parametroPropriedade}`,
         {
           method: "DELETE",
           headers: { Authorization: `Bearer ${token}` },
@@ -1126,7 +1135,7 @@ export function NotasFiscais() {
       );
       if (response.ok) {
         setIsDeleteModalOpen(false);
-        setNotas([]);
+        setIsLoadingNotas(true);
         buscarNotas();
       }
     } catch (error) {
@@ -1137,16 +1146,13 @@ export function NotasFiscais() {
   };
 
   const notasFiltradas = notas.filter((nota) => {
-    // Filtro de Pesquisa (Texto)
     const matchesSearch =
       nota.empresaEnvolvida.toLowerCase().includes(searchTerm.toLowerCase()) ||
       nota.numero.toLowerCase().includes(searchTerm.toLowerCase());
 
-    // Filtro de Tipo (Entrada/Saída)
     const matchesTab =
       activeTab === "todas" || nota.tipo.toLowerCase() === activeTab;
 
-    // Filtro de Dedutibilidade (Apenas se for Saída)
     let matchesDedutibilidade = true;
     if (activeTab === "saida" && filtroDedutibilidade !== "todos") {
       if (filtroDedutibilidade === "dedutivel")
@@ -1155,17 +1161,19 @@ export function NotasFiscais() {
         matchesDedutibilidade = nota.itens.some((item) => !item.isDedutivel);
     }
 
-    // Filtro de Auditoria (Conferidas/Pendentes)
     let matchesConferida = true;
     if (filtroConferida !== "todos") {
       if (filtroConferida === "conferida")
         matchesConferida = nota.conferida === true;
-      if (filtroConferida === "pendente") matchesConferida = !nota.conferida; // null ou false
+      if (filtroConferida === "pendente") matchesConferida = !nota.conferida;
     }
 
-    // Só exibe a nota se ela passar em todas as travas
+    // Esconde as notas se não forem da fazenda selecionada (exceto se for Consolidado)
+    const matchesPropriedade = !currentProperty || (nota.propriedadeId != null && Number(nota.propriedadeId) === Number(currentProperty.id));
+
+    // Adicione o matchesPropriedade no return:
     return (
-      matchesSearch && matchesTab && matchesDedutibilidade && matchesConferida
+      matchesSearch && matchesTab && matchesDedutibilidade && matchesConferida && matchesPropriedade
     );
   });
 
@@ -2341,6 +2349,24 @@ export function NotasFiscais() {
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg outline-none text-sm focus:border-agro-secondary"
                     />
                   </div>
+                  {/* CAMPO DE OBSERVAÇÃO AQUI */}
+                  <div className="space-y-1 md:col-span-2 pt-2 border-t border-gray-100">
+                    <label className="text-xs font-bold text-gray-600 uppercase">
+                      Observações / Apontamentos (Opcional)
+                    </label>
+                    <textarea
+                      rows={2}
+                      placeholder="Adicione detalhes ou justificativas internas sobre esta nota..."
+                      value={manualForm.observacao}
+                      onChange={(e) =>
+                        setManualForm({
+                          ...manualForm,
+                          observacao: e.target.value,
+                        })
+                      }
+                      className="w-full px-3 py-2 bg-gray-50 border border-gray-300 rounded-lg outline-none text-sm focus:bg-white focus:border-agro-secondary resize-none transition-colors"
+                    />
+                  </div>
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-end pt-2 border-t border-gray-100">
@@ -2692,6 +2718,30 @@ export function NotasFiscais() {
                   ))}
                 </div>
               )}
+
+              {/* ========================================================= */}
+              {/* NOVO: CHECKBOX DE PARCELAS */}
+              {/* ========================================================= */}
+              <label className="flex items-start gap-3 cursor-pointer mt-4 p-4 bg-blue-50/50 border border-blue-100 rounded-xl hover:bg-blue-50 transition-colors">
+                <div className="mt-0.5">
+                  <input
+                    type="checkbox"
+                    checked={importarComParcelas}
+                    onChange={(e) => setImportarComParcelas(e.target.checked)}
+                    className="rounded border-gray-300 text-blue-600 focus:ring-blue-600 w-4 h-4 cursor-pointer"
+                  />
+                </div>
+                <div className="flex flex-col">
+                  <span className="text-sm font-bold text-blue-900">
+                    Manter parcelas originais da nota
+                  </span>
+                  <span className="text-xs text-blue-700/70 mt-0.5 leading-relaxed">
+                    Se desmarcado, o sistema ignorará o parcelamento a prazo do
+                    XML e lançará 100% do valor da nota como "À vista" na data
+                    de emissão.
+                  </span>
+                </div>
+              </label>
             </div>
             <div className="p-6 border-t border-gray-100 bg-gray-50 flex items-center justify-end gap-3">
               <button
