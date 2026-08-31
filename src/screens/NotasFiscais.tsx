@@ -183,6 +183,97 @@ export function NotasFiscais() {
   const baseUrl = import.meta.env.VITE_API_URL;
   const { currentProducer, currentProperty } = useProducer();
   const location = useLocation();
+
+  // =========================================================================
+  // ESTADOS E FUNÇÕES DA SEFAZ (Sincronização e Manifestação Em Memória)
+  // =========================================================================
+  const [isSefazModalOpen, setIsSefazModalOpen] = useState(false);
+  const [certFile, setCertFile] = useState<File | null>(null);
+  const [certPassword, setCertPassword] = useState("");
+  const [isSyncing, setIsSyncing] = useState(false);
+
+  const [isManifestModalOpen, setIsManifestModalOpen] = useState(false);
+  const [manifestAcao, setManifestAcao] = useState<"CONFIRMAR" | "DESCONHECER">(
+    "CONFIRMAR",
+  );
+  const [manifestChave, setManifestChave] = useState("");
+
+  const handleSincronizarSefaz = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!currentProducer || !certFile || !certPassword) return;
+
+    setIsSyncing(true);
+    try {
+      const formData = new FormData();
+      formData.append("certificado", certFile);
+      formData.append("senha", certPassword);
+
+      const token = localStorage.getItem("@AgroPops:token");
+      const response = await fetch(
+        `${baseUrl}/notas/sincronizar-sefaz/${currentProducer.id}`,
+        {
+          method: "POST",
+          headers: { Authorization: `Bearer ${token}` },
+          body: formData,
+        },
+      );
+
+     if (response.ok) {
+        const result = await response.json();
+        alert(
+          `Sincronização concluída!\n\nNotas Importadas: ${result.importadas}\nNotas já existentes: ${result.ignoradas}`,
+        );
+        setIsSefazModalOpen(false);
+        setCertFile(null);
+        setCertPassword("");
+        setIsLoadingNotas(true);
+        buscarNotas(); // Apenas atualiza a tabela silenciosamente, mantendo o produtor na tela
+      } else {
+        alert(`Erro: ${await response.text()}`);
+      }
+    } catch (error) {
+      alert("Erro de comunicação com o servidor.");
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  const handleManifestarNota = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!currentProducer || !certFile || !certPassword || !manifestChave)
+      return;
+
+    setIsSyncing(true);
+    try {
+      const formData = new FormData();
+      formData.append("tipo", manifestAcao);
+      formData.append("certificado", certFile);
+      formData.append("senha", certPassword);
+
+      const token = localStorage.getItem("@AgroPops:token");
+      const response = await fetch(
+        `${baseUrl}/notas/manifestar/${currentProducer.id}/${manifestChave}`,
+        {
+          method: "POST",
+          headers: { Authorization: `Bearer ${token}` },
+          body: formData,
+        },
+      );
+
+      if (response.ok) {
+        alert(await response.text());
+        setIsManifestModalOpen(false);
+        setCertFile(null);
+        setCertPassword("");
+      } else {
+        alert(await response.text());
+      }
+    } catch (error) {
+      alert("Erro de comunicação ao manifestar a nota.");
+    } finally {
+      setIsSyncing(false);
+    }
+  };
   const [importarComParcelas, setImportarComParcelas] = useState(true);
   const [divergentes, setDivergentes] = useState<any[]>([]);
   const [arquivosDivergentesMap, setArquivosDivergentesMap] = useState<
@@ -796,9 +887,9 @@ export function NotasFiscais() {
       setDivergentes([]);
       setSelectedDivergentes(new Set());
       setArquivosDivergentesMap(new Map());
-      
+
       // Força a tabela a mostrar o ícone de carregamento imediatamente
-      setIsLoadingNotas(true); 
+      setIsLoadingNotas(true);
 
       buscarNotas();
       setIsUploading(false);
@@ -1122,9 +1213,11 @@ export function NotasFiscais() {
     try {
       const token = localStorage.getItem("@AgroPops:token");
       const parametros = obterParametrosDeData(activePeriod);
-      
+
       // Se tiver uma propriedade selecionada, avisa o backend para apagar só as dela
-      const parametroPropriedade = currentProperty ? `&propriedadeId=${currentProperty.id}` : "";
+      const parametroPropriedade = currentProperty
+        ? `&propriedadeId=${currentProperty.id}`
+        : "";
 
       const response = await fetch(
         `${baseUrl}/notas/deletar-todas/${currentProducer.id}${parametros}${parametroPropriedade}`,
@@ -1169,11 +1262,18 @@ export function NotasFiscais() {
     }
 
     // Esconde as notas se não forem da fazenda selecionada (exceto se for Consolidado)
-    const matchesPropriedade = !currentProperty || (nota.propriedadeId != null && Number(nota.propriedadeId) === Number(currentProperty.id));
+    const matchesPropriedade =
+      !currentProperty ||
+      (nota.propriedadeId != null &&
+        Number(nota.propriedadeId) === Number(currentProperty.id));
 
     // Adicione o matchesPropriedade no return:
     return (
-      matchesSearch && matchesTab && matchesDedutibilidade && matchesConferida && matchesPropriedade
+      matchesSearch &&
+      matchesTab &&
+      matchesDedutibilidade &&
+      matchesConferida &&
+      matchesPropriedade
     );
   });
 
@@ -1302,13 +1402,6 @@ export function NotasFiscais() {
 
           <div className="flex items-center gap-3 w-full lg:w-auto justify-end">
             <button
-              onClick={() => setIsDeleteModalOpen(true)}
-              disabled={isLoading || notas.length === 0}
-              className="flex items-center gap-2 bg-rose-50 text-rose-700 border border-rose-200 px-4 py-2.5 rounded-xl font-medium hover:bg-rose-100 transition-colors shadow-sm text-sm disabled:opacity-50"
-            >
-              <Trash2 size={18} /> Apagar Seleção
-            </button>
-            <button
               onClick={() => setIsScannerModalOpen(true)}
               className="flex items-center gap-2 bg-blue-50 text-blue-700 border border-blue-200 px-4 py-2.5 rounded-xl font-medium hover:bg-blue-100 transition-colors shadow-sm text-sm"
             >
@@ -1328,6 +1421,12 @@ export function NotasFiscais() {
               className="flex items-center gap-2 bg-emerald-50 text-emerald-700 border border-emerald-200 px-4 py-2.5 rounded-xl font-medium hover:bg-emerald-100 transition-colors shadow-sm text-sm"
             >
               <UploadCloud size={18} /> Importar XML
+            </button>
+            <button
+              onClick={() => setIsSefazModalOpen(true)}
+              className="flex items-center gap-2 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 px-4 py-2.5 rounded-xl font-medium transition-colors shadow-sm text-sm"
+            >
+              <UploadCloud size={18} /> Sincronizar via SEFAZ
             </button>
           </div>
         </div>
@@ -1372,58 +1471,74 @@ export function NotasFiscais() {
         {/* ========================================================= */}
         {/* BARRA DE FILTROS AVANÇADOS (AUDITORIA E LIVRO CAIXA)      */}
         {/* ========================================================= */}
-        <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-3 pt-3 border-t border-gray-100 mt-2">
-          {/* FILTRO 1: AUDITORIA (Sempre visível) */}
-          <div className="flex items-center flex-wrap gap-2">
-            <span className="text-sm font-semibold text-gray-500 mr-2 flex items-center gap-1">
-              <CheckCircle size={16} /> Auditoria:
-            </span>
+        <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-4 pt-3 border-t border-gray-100 mt-2">
+          
+          {/* Container dos Filtros (Esquerda) */}
+          <div className="flex flex-col md:flex-row items-start md:items-center gap-4">
+            {/* FILTRO 1: AUDITORIA (Sempre visível) */}
+            <div className="flex items-center flex-wrap gap-2">
+              <span className="text-sm font-semibold text-gray-500 mr-2 flex items-center gap-1">
+                <CheckCircle size={16} /> Auditoria:
+              </span>
+              <button
+                onClick={() => setFiltroConferida("todos")}
+                className={`px-3 py-1.5 text-xs font-bold rounded-full border transition-all ${filtroConferida === "todos" ? "bg-slate-800 text-white border-slate-800 shadow-sm" : "bg-white text-gray-500 border-gray-200 hover:bg-gray-50"}`}
+              >
+                Todas as Notas
+              </button>
+              <button
+                onClick={() => setFiltroConferida("conferida")}
+                className={`px-3 py-1.5 text-xs font-bold rounded-full border transition-all ${filtroConferida === "conferida" ? "bg-emerald-100 text-emerald-700 border-emerald-200 shadow-sm" : "bg-white text-gray-500 border-gray-200 hover:bg-gray-50"}`}
+              >
+                Conferidas
+              </button>
+              <button
+                onClick={() => setFiltroConferida("pendente")}
+                className={`px-3 py-1.5 text-xs font-bold rounded-full border transition-all ${filtroConferida === "pendente" ? "bg-amber-100 text-amber-700 border-amber-200 shadow-sm" : "bg-white text-gray-500 border-gray-200 hover:bg-gray-50"}`}
+              >
+                Pendentes
+              </button>
+            </div>
+
+            {/* FILTRO 2: LIVRO CAIXA (Só aparece quando seleciona "Saídas") */}
+            {activeTab === "saida" && (
+              <div className="flex items-center flex-wrap gap-2">
+                <span className="text-sm font-semibold text-gray-500 mr-2 flex items-center gap-1">
+                  <FileText size={16} /> Livro Caixa:
+                </span>
+                <button
+                  onClick={() => setFiltroDedutibilidade("todos")}
+                  className={`px-3 py-1.5 text-xs font-bold rounded-full border transition-all ${filtroDedutibilidade === "todos" ? "bg-slate-800 text-white border-slate-800 shadow-sm" : "bg-white text-gray-500 border-gray-200 hover:bg-gray-50"}`}
+                >
+                  Todas as Saídas
+                </button>
+                <button
+                  onClick={() => setFiltroDedutibilidade("dedutivel")}
+                  className={`px-3 py-1.5 text-xs font-bold rounded-full border transition-all ${filtroDedutibilidade === "dedutivel" ? "bg-blue-100 text-blue-700 border-blue-200 shadow-sm" : "bg-white text-gray-500 border-gray-200 hover:bg-gray-50"}`}
+                >
+                  Lançados no Livro
+                </button>
+                <button
+                  onClick={() => setFiltroDedutibilidade("nao_dedutivel")}
+                  className={`px-3 py-1.5 text-xs font-bold rounded-full border transition-all ${filtroDedutibilidade === "nao_dedutivel" ? "bg-rose-100 text-rose-700 border-rose-200 shadow-sm" : "bg-white text-gray-500 border-gray-200 hover:bg-gray-50"}`}
+                >
+                  Uso Pessoal (Não Lançado)
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* Container das Ações Secundárias (Direita) */}
+          <div className="flex shrink-0">
             <button
-              onClick={() => setFiltroConferida("todos")}
-              className={`px-3 py-1.5 text-xs font-bold rounded-full border transition-all ${filtroConferida === "todos" ? "bg-slate-800 text-white border-slate-800 shadow-sm" : "bg-white text-gray-500 border-gray-200 hover:bg-gray-50"}`}
+              onClick={() => setIsDeleteModalOpen(true)}
+              disabled={isLoading || notas.length === 0}
+              className="flex items-center gap-2 bg-rose-50 text-rose-700 border border-rose-100 px-4 py-2 rounded-xl font-medium hover:bg-rose-100 transition-colors text-sm disabled:opacity-50"
             >
-              Todas as Notas
-            </button>
-            <button
-              onClick={() => setFiltroConferida("conferida")}
-              className={`px-3 py-1.5 text-xs font-bold rounded-full border transition-all ${filtroConferida === "conferida" ? "bg-emerald-100 text-emerald-700 border-emerald-200 shadow-sm" : "bg-white text-gray-500 border-gray-200 hover:bg-gray-50"}`}
-            >
-              Conferidas
-            </button>
-            <button
-              onClick={() => setFiltroConferida("pendente")}
-              className={`px-3 py-1.5 text-xs font-bold rounded-full border transition-all ${filtroConferida === "pendente" ? "bg-amber-100 text-amber-700 border-amber-200 shadow-sm" : "bg-white text-gray-500 border-gray-200 hover:bg-gray-50"}`}
-            >
-              Pendentes
+              <Trash2 size={16} /> Apagar Seleção
             </button>
           </div>
 
-          {/* FILTRO 2: LIVRO CAIXA (Só aparece quando seleciona "Saídas") */}
-          {activeTab === "saida" && (
-            <div className="flex items-center flex-wrap gap-2">
-              <span className="text-sm font-semibold text-gray-500 mr-2 flex items-center gap-1">
-                <FileText size={16} /> Livro Caixa:
-              </span>
-              <button
-                onClick={() => setFiltroDedutibilidade("todos")}
-                className={`px-3 py-1.5 text-xs font-bold rounded-full border transition-all ${filtroDedutibilidade === "todos" ? "bg-slate-800 text-white border-slate-800 shadow-sm" : "bg-white text-gray-500 border-gray-200 hover:bg-gray-50"}`}
-              >
-                Todas as Saídas
-              </button>
-              <button
-                onClick={() => setFiltroDedutibilidade("dedutivel")}
-                className={`px-3 py-1.5 text-xs font-bold rounded-full border transition-all ${filtroDedutibilidade === "dedutivel" ? "bg-blue-100 text-blue-700 border-blue-200 shadow-sm" : "bg-white text-gray-500 border-gray-200 hover:bg-gray-50"}`}
-              >
-                Lançados no Livro
-              </button>
-              <button
-                onClick={() => setFiltroDedutibilidade("nao_dedutivel")}
-                className={`px-3 py-1.5 text-xs font-bold rounded-full border transition-all ${filtroDedutibilidade === "nao_dedutivel" ? "bg-rose-100 text-rose-700 border-rose-200 shadow-sm" : "bg-white text-gray-500 border-gray-200 hover:bg-gray-50"}`}
-              >
-                Uso Pessoal (Não Lançado)
-              </button>
-            </div>
-          )}
         </div>
       </div>
 
@@ -1582,15 +1697,37 @@ export function NotasFiscais() {
                         "Lançamento Manual (Sem Chave)"}
                     </span>
                     {selectedNotaModal.chaveAcesso && (
-                      <a
-                        href="https://www.nfe.fazenda.gov.br/portal/consultaRecaptcha.aspx?tipoConsulta=resumo&tipoConteudo=7PhJ+gAVw2g="
-                        target="_blank"
-                        rel="noreferrer"
-                        className="text-white bg-agro-secondary hover:bg-agro-primary px-2 py-1 rounded-md transition-colors shadow-sm flex items-center gap-1 text-[11px] font-bold"
-                        title="Ir para o Portal Nacional (A chave já está na sua área de transferência)"
-                      >
-                        Portal Nacional <ExternalLink size={12} />
-                      </a>
+                      <>
+                        <a
+                          href="https://www.nfe.fazenda.gov.br/portal/consultaRecaptcha.aspx?tipoConsulta=resumo&tipoConteudo=7PhJ+gAVw2g="
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-white bg-agro-secondary hover:bg-agro-primary px-2 py-1 rounded-md transition-colors shadow-sm flex items-center gap-1 text-[11px] font-bold"
+                          title="Ir para o Portal Nacional (A chave já está na sua área de transferência)"
+                        >
+                          Portal Nacional <ExternalLink size={12} />
+                        </a>
+                        <button
+                          onClick={() => {
+                            setManifestAcao("CONFIRMAR");
+                            setManifestChave(selectedNotaModal.chaveAcesso!);
+                            setIsManifestModalOpen(true);
+                          }}
+                          className="text-emerald-700 bg-emerald-100 hover:bg-emerald-200 border border-emerald-200 px-2 py-1 rounded-md transition-colors shadow-sm flex items-center gap-1 text-[11px] font-bold ml-2"
+                        >
+                          Confirmar Operação
+                        </button>
+                        <button
+                          onClick={() => {
+                            setManifestAcao("DESCONHECER");
+                            setManifestChave(selectedNotaModal.chaveAcesso!);
+                            setIsManifestModalOpen(true);
+                          }}
+                          className="text-rose-700 bg-rose-100 hover:bg-rose-200 border border-rose-200 px-2 py-1 rounded-md transition-colors shadow-sm flex items-center gap-1 text-[11px] font-bold"
+                        >
+                          Desconhecer
+                        </button>
+                      </>
                     )}
                   </div>
                 </div>
@@ -3085,6 +3222,178 @@ export function NotasFiscais() {
                 Cancelar (Voltar à Edição)
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL DE MANIFESTAÇÃO DE NOTA */}
+      {isManifestModalOpen && (
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-[110] flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden flex flex-col">
+            <div
+              className={`p-6 border-b border-gray-100 flex items-center justify-between ${manifestAcao === "CONFIRMAR" ? "bg-emerald-50" : "bg-rose-50"}`}
+            >
+              <h2
+                className={`text-lg font-bold flex items-center gap-2 ${manifestAcao === "CONFIRMAR" ? "text-emerald-800" : "text-rose-800"}`}
+              >
+                {manifestAcao === "CONFIRMAR" ? (
+                  <CheckCircle className="text-emerald-600" />
+                ) : (
+                  <AlertCircle className="text-rose-600" />
+                )}
+                {manifestAcao === "CONFIRMAR"
+                  ? "Confirmar Operação"
+                  : "Desconhecer Operação"}
+              </h2>
+              <button
+                onClick={() => setIsManifestModalOpen(false)}
+                className="p-2 hover:bg-white/50 rounded-lg text-gray-500"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            <div className="p-4 mx-6 mt-6 rounded-xl border bg-gray-50 border-gray-200 text-sm text-gray-600 text-center">
+              Você está prestes a enviar um evento oficial para a SEFAZ
+              referente à chave:
+              <br />
+              <strong className="font-mono text-xs break-all">
+                {manifestChave}
+              </strong>
+            </div>
+
+            <form onSubmit={handleManifestarNota} className="p-6 space-y-4">
+              <div className="space-y-1">
+                <label className="text-xs font-bold text-gray-600 uppercase">
+                  Arquivo do Certificado (.PFX / .P12)
+                </label>
+                <input
+                  type="file"
+                  required
+                  accept=".pfx,.p12"
+                  onChange={(e) =>
+                    setCertFile(e.target.files ? e.target.files[0] : null)
+                  }
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-700 bg-gray-50 cursor-pointer"
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs font-bold text-gray-600 uppercase">
+                  Senha do Certificado
+                </label>
+                <input
+                  type="password"
+                  required
+                  placeholder="Digite a senha..."
+                  value={certPassword}
+                  onChange={(e) => setCertPassword(e.target.value)}
+                  className="w-full px-4 py-2.5 border border-gray-300 rounded-lg outline-none text-sm focus:border-agro-secondary shadow-sm"
+                />
+              </div>
+
+              <div className="pt-4 border-t border-gray-100 flex justify-end gap-3 mt-6">
+                <button
+                  type="button"
+                  onClick={() => setIsManifestModalOpen(false)}
+                  disabled={isSyncing}
+                  className="px-5 py-2.5 text-sm font-medium text-gray-600 hover:bg-gray-200 rounded-xl transition-colors"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSyncing || !certFile}
+                  className={`px-6 py-2.5 text-sm font-bold text-white rounded-xl shadow-sm flex items-center gap-2 disabled:opacity-50 ${manifestAcao === "CONFIRMAR" ? "bg-emerald-600 hover:bg-emerald-700" : "bg-rose-600 hover:bg-rose-700"}`}
+                >
+                  {isSyncing ? (
+                    <Loader2 size={16} className="animate-spin" />
+                  ) : (
+                    "Enviar Evento à SEFAZ"
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de Sincronização SEFAZ  */}
+      {isSefazModalOpen && (
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden flex flex-col">
+            <div className="p-6 border-b border-gray-100 flex items-center justify-between bg-blue-50">
+              <h2 className="text-lg font-bold text-blue-800 flex items-center gap-2">
+                <UploadCloud className="text-blue-600" /> Sincronizar com SEFAZ
+              </h2>
+              <button
+                onClick={() => setIsSefazModalOpen(false)}
+                className="p-2 hover:bg-blue-100 rounded-lg text-blue-600"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            <div className="bg-amber-50 p-4 mx-6 mt-6 rounded-xl border border-amber-200 text-sm text-amber-800 flex items-start gap-3">
+              <AlertCircle size={20} className="shrink-0 mt-0.5" />
+              <p>
+                Busca as notas emitidas contra o produtor nos últimos 90 dias. <br></br>
+                <strong>Segurança:</strong> Seu certificado digital será usado
+                apenas durante esta busca. Nós <strong>não armazenamos</strong>{" "}
+                o arquivo ou a senha.
+              </p>
+            </div>
+
+            <form onSubmit={handleSincronizarSefaz} className="p-6 space-y-4">
+              <div className="space-y-1">
+                <label className="text-xs font-bold text-gray-600 uppercase">
+                  Arquivo do Certificado (.PFX / .P12)
+                </label>
+                <input
+                  type="file"
+                  required
+                  accept=".pfx,.p12"
+                  onChange={(e) =>
+                    setCertFile(e.target.files ? e.target.files[0] : null)
+                  }
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-700 bg-gray-50 cursor-pointer file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs font-bold text-gray-600 uppercase">
+                  Senha do Certificado
+                </label>
+                <input
+                  type="password"
+                  required
+                  placeholder="Digite a senha..."
+                  value={certPassword}
+                  onChange={(e) => setCertPassword(e.target.value)}
+                  className="w-full px-4 py-2.5 border border-gray-300 rounded-lg outline-none text-sm focus:border-blue-500 shadow-sm"
+                />
+              </div>
+
+              <div className="pt-4 border-t border-gray-100 flex justify-end gap-3 mt-6">
+                <button
+                  type="button"
+                  onClick={() => setIsSefazModalOpen(false)}
+                  disabled={isSyncing}
+                  className="px-5 py-2.5 text-sm font-medium text-gray-600 hover:bg-gray-200 rounded-xl transition-colors"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSyncing || !certFile}
+                  className="px-6 py-2.5 text-sm font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-xl transition-colors shadow-sm flex items-center gap-2 disabled:opacity-50"
+                >
+                  {isSyncing ? (
+                    <Loader2 size={16} className="animate-spin" />
+                  ) : (
+                    "Iniciar Busca"
+                  )}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}
