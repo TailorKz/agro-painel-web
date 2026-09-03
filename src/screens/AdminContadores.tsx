@@ -15,6 +15,10 @@ import {
   Plus,
   Trash2,
   MoreVertical,
+  MonitorSmartphone,
+  Copy,
+  CalendarClock,
+  PowerOff
 } from "lucide-react";
 
 type Contador = {
@@ -25,6 +29,9 @@ type Contador = {
   telefone: string;
   crc: string;
   estado: string;
+  moduloDesktopAtivo?: boolean;
+  vencimentoDesktop?: string;
+  tokenDesktop?: string;
 };
 type Produtor = {
   id: number;
@@ -44,9 +51,11 @@ export function AdminContadores() {
   const [selectedContador, setSelectedContador] = useState<Contador | null>(
     null,
   );
-  const [activeTab, setActiveTab] = useState<"produtores" | "admin">(
+  const [activeTab, setActiveTab] = useState<"produtores" | "admin" | "desktop">(
     "produtores",
   );
+  const [mesesAssinatura, setMesesAssinatura] = useState(1);
+
   const [produtores, setProdutores] = useState<Produtor[]>([]);
   const [isLoadingProdutores, setIsLoadingProdutores] = useState(false);
 
@@ -236,6 +245,37 @@ export function AdminContadores() {
     }
   };
 
+  const handleConfigurarDesktop = async (acao: "GERAR" | "REVOGAR") => {
+    if (!selectedContador) return;
+    if (acao === "REVOGAR" && !window.confirm(`Deseja realmente bloquear o acesso de ${selectedContador.nomeEscritorio} ao App Desktop?`)) return;
+
+    setIsProcessing(true);
+    try {
+      const res = await fetch(`${baseUrl}/admins/contadores/${selectedContador.id}/desktop`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ acao, meses: mesesAssinatura }),
+      });
+
+      if (res.ok) {
+        const atualizado = await res.json();
+        // Atualiza a lista e o contador selecionado em tempo real
+        setContadores((prev) => prev.map(c => c.id === atualizado.id ? atualizado : c));
+        setSelectedContador(atualizado);
+        alert(acao === "GERAR" ? "Licença atualizada com sucesso!" : "Acesso revogado!");
+      } else {
+        alert("Erro ao configurar módulo desktop.");
+      }
+    } catch (err) {
+      alert("Erro de conexão.");
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
   const criarContador = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsProcessing(true);
@@ -264,6 +304,7 @@ export function AdminContadores() {
     setFormProdutor({
       nome: "",
       cpfCnpj: "",
+      cnpj: "",
       inscricaoEstadual: "",
       senha: "",
       contadorId: idContador ? idContador.toString() : "",
@@ -387,6 +428,7 @@ export function AdminContadores() {
               </ul>
             )}
           </div>
+          
         </div>
 
         {/* DIREITA: DETALHES DO CONTADOR SELECIONADO */}
@@ -418,6 +460,12 @@ export function AdminContadores() {
                   className={`flex-1 py-3 text-sm font-bold transition-colors ${activeTab === "produtores" ? "text-emerald-700 border-b-2 border-emerald-600 bg-white" : "text-gray-500 hover:bg-gray-100"}`}
                 >
                   Carteira de Produtores
+                </button>
+                <button
+                  onClick={() => setActiveTab("desktop")}
+                  className={`flex-1 py-3 text-sm font-bold transition-colors flex justify-center items-center gap-2 ${activeTab === "desktop" ? "text-blue-600 border-b-2 border-blue-600 bg-white" : "text-gray-500 hover:bg-gray-100"}`}
+                >
+                  <MonitorSmartphone size={16} /> App Desktop
                 </button>
                 <button
                   onClick={() => setActiveTab("admin")}
@@ -596,11 +644,115 @@ export function AdminContadores() {
                     </div>
                   </div>
                 )}
+                {/* --- NOVA ABA: MÓDULO DESKTOP --- */}
+                {activeTab === "desktop" && (
+                  <div className="space-y-6 animate-in fade-in duration-300">
+                    {/* Status do Módulo */}
+                    <div className={`p-6 rounded-2xl border shadow-sm flex items-center justify-between ${selectedContador.moduloDesktopAtivo ? "bg-blue-50 border-blue-100" : "bg-gray-50 border-gray-200"}`}>
+                      <div>
+                        <h3 className={`text-lg font-bold ${selectedContador.moduloDesktopAtivo ? "text-blue-800" : "text-gray-600"}`}>
+                          Módulo App Desktop
+                        </h3>
+                        <p className={`text-sm mt-1 ${selectedContador.moduloDesktopAtivo ? "text-blue-600" : "text-gray-500"}`}>
+                          {selectedContador.moduloDesktopAtivo 
+                            ? "Assinatura ativa e aplicativo autorizado." 
+                            : "Este contador não possui acesso ao aplicativo de extração da SEFAZ."}
+                        </p>
+                      </div>
+                      <div className={`px-4 py-2 rounded-xl font-bold text-sm ${selectedContador.moduloDesktopAtivo ? "bg-blue-600 text-white" : "bg-gray-200 text-gray-500"}`}>
+                        {selectedContador.moduloDesktopAtivo ? "ATIVO" : "INATIVO"}
+                      </div>
+                    </div>
+
+                    {selectedContador.moduloDesktopAtivo && (
+                      <div className="bg-white border border-gray-200 p-6 rounded-2xl shadow-sm space-y-6">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2 text-gray-700">
+                            <CalendarClock size={20} className="text-blue-600" />
+                            <span className="font-bold">Válido até:</span>
+                            <span className="font-mono text-lg bg-gray-100 px-3 py-1 rounded-lg">
+                              {selectedContador.vencimentoDesktop ? new Date(selectedContador.vencimentoDesktop).toLocaleDateString('pt-BR') : "-"}
+                            </span>
+                          </div>
+                        </div>
+
+                        <div>
+                          <label className="block text-sm font-bold text-gray-600 mb-2 uppercase tracking-wider">
+                            Crachá de Integração (Token)
+                          </label>
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="text"
+                              readOnly
+                              value={selectedContador.tokenDesktop || ""}
+                              className="flex-1 bg-gray-50 border border-gray-200 p-3 rounded-xl font-mono text-sm text-gray-500 outline-none"
+                            />
+                            <button
+                              onClick={() => {
+                                navigator.clipboard.writeText(selectedContador.tokenDesktop || "");
+                                alert("Token copiado!");
+                              }}
+                              className="p-3 bg-blue-50 text-blue-600 hover:bg-blue-100 rounded-xl transition-colors border border-blue-200"
+                              title="Copiar Token"
+                            >
+                              <Copy size={20} />
+                            </button>
+                          </div>
+                          <p className="text-xs text-gray-400 mt-2">
+                            Copie e envie este código para o contador inserir no aplicativo desktop.
+                          </p>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Ações Gerenciais */}
+                    <div className="bg-white border border-gray-100 p-6 rounded-2xl shadow-sm">
+                      <h4 className="text-sm font-bold text-gray-800 mb-4 uppercase tracking-wider">
+                        Controle Comercial
+                      </h4>
+                      <div className="flex flex-col sm:flex-row items-center gap-4">
+                        <div className="flex items-center gap-2 w-full sm:w-auto bg-gray-50 p-2 rounded-xl border border-gray-200">
+                          <span className="text-sm font-bold text-gray-600 pl-2">Adicionar:</span>
+                          <select 
+                            value={mesesAssinatura}
+                            onChange={(e) => setMesesAssinatura(Number(e.target.value))}
+                            className="bg-white border border-gray-200 p-2 rounded-lg text-sm font-bold text-gray-800 outline-none"
+                          >
+                            <option value={1}>1 Mês</option>
+                            <option value={3}>3 Meses</option>
+                            <option value={6}>6 Meses</option>
+                            <option value={12}>1 Ano</option>
+                          </select>
+                        </div>
+                        
+                        <button
+                          onClick={() => handleConfigurarDesktop("GERAR")}
+                          disabled={isProcessing}
+                          className="flex-1 w-full sm:w-auto py-3 px-6 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl shadow-sm flex items-center justify-center gap-2 transition-colors disabled:opacity-50"
+                        >
+                          {isProcessing ? <Loader2 size={18} className="animate-spin" /> : <MonitorSmartphone size={18} />}
+                          {selectedContador.moduloDesktopAtivo ? "Renovar Tempo" : "Liberar Acesso e Gerar Crachá"}
+                        </button>
+
+                        {selectedContador.moduloDesktopAtivo && (
+                          <button
+                            onClick={() => handleConfigurarDesktop("REVOGAR")}
+                            disabled={isProcessing}
+                            className="flex-1 w-full sm:w-auto py-3 px-6 bg-rose-50 hover:bg-rose-100 text-rose-700 font-bold border border-rose-200 rounded-xl shadow-sm flex items-center justify-center gap-2 transition-colors disabled:opacity-50"
+                          >
+                            {isProcessing ? <Loader2 size={18} className="animate-spin" /> : <PowerOff size={18} />}
+                            Revogar Acesso
+                          </button>
+                       )}
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
             </>
           )}
-        </div>
       </div>
+</div>
 
       {/* ================= MODAIS ================= */}
 
